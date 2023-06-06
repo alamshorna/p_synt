@@ -69,7 +69,13 @@ DNA = Alphabet(b'ACGT')
 
 class Uniprot21(Alphabet):
     def __init__(self, mask=False):
+        """
+        alphabet encoding amino acid residues, with O, U, B, Z as synonyms
+        encodes all characters as a byte string
+        uses np.arange() to split this byte encoding into individual tokens
+        """
         chars = b'ARNDCQEGHILKMFPSTWYVXOUBZ'
+        #processing_tokens = ['[START]', '[END]', '[PAD]']
         encoding = np.arange(len(chars))
         encoding[21:] = [11, 4, 20, 20]  # encode 'OUBZ' as synonyms
         super(Uniprot21, self).__init__(chars, encoding=encoding, mask=mask, missing=20)
@@ -82,20 +88,20 @@ class NucleotideCodons(Alphabet):
         super(NucleotideCodons, self).__init__(chars, encoding=encoding, mask=mask, missing=64)
 
 
-class SDM12(Alphabet):
-    """
-    A D KER N TSQ YF LIVM C W H G P
+# class SDM12(Alphabet):
+#     """
+#     A D KER N TSQ YF LIVM C W H G P
 
-    See https://www.ncbi.nlm.nih.gov/pmc/articles/PMC2732308/#B33
-    "Reduced amino acid alphabets exhibit an improved sensitivity and selectivity in fold assignment"
-    Peterson et al. 2009. Bioinformatics.
-    """
-    def __init__(self, mask=False):
-        chars = b'ADKNTYLCWHGPXERSQFIVMOUBZ'
-        groups = [b'A', b'D', b'KERO', b'N', b'TSQ', b'YF', b'LIVM', b'CU', b'W', b'H', b'G', b'P', b'XBZ']
-        groups = {c: i for i in range(len(groups)) for c in groups[i]}
-        encoding = np.array([groups[c] for c in chars])
-        super(SDM12, self).__init__(chars, encoding=encoding, mask=mask)
+#     See https://www.ncbi.nlm.nih.gov/pmc/articles/PMC2732308/#B33
+#     "Reduced amino acid alphabets exhibit an improved sensitivity and selectivity in fold assignment"
+#     Peterson et al. 2009. Bioinformatics.
+#     """
+#     def __init__(self, mask=False):
+#         chars = b'ADKNTYLCWHGPXERSQFIVMOUBZ'
+#         groups = [b'A', b'D', b'KERO', b'N', b'TSQ', b'YF', b'LIVM', b'CU', b'W', b'H', b'G', b'P', b'XBZ']
+#         groups = {c: i for i in range(len(groups)) for c in groups[i]}
+#         encoding = np.array([groups[c] for c in chars])
+#         super(SDM12, self).__init__(chars, encoding=encoding, mask=mask)
 
 
-SecStr8 = Alphabet(b'HBEGITS ')
+# SecStr8 = Alphabet(b'HBEGITS ')
