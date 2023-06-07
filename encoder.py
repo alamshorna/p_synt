@@ -71,10 +71,36 @@ def encode_codon(sequence):
     """
     codon_list = translation_window(sequence)
     return [token_index_codon['[START]']] + [token_index_codon[amino[codon]] for codon in codon_list] + [token_index_codon['[END]']]
+    tokens = [token_index_codon['[START]']] + [token_index_codon[amino[codon]] for codon in codon_list] + [token_index_codon['[END]']]
+    return (tokens, len(tokens))
+
 
 some_sentence = "ATGTCTACAAACTCGATAAAATTACTCGCCAGCGATGTGCATAGAGGACTCGCTGAATTAGTTGCGAGGAGGCTAGGTTTGCACATACTACCATGTGAGTTGAAAAGGGAATCCACGGGGGAAGTTCAATTCTCTATTGGGGAATCAGTTAGAGACGAAGATGTTTTTATTGTTTGTCAGATTGGTTCTGGCGAGGTAAATGACAGGGTGATTGAGCTCATGATCATGATTAACGCTTGTAAAACAGCTAGTGCTAGAAGAATCACCGTTATATTGCCAAACTTTCCTTACGCAAGACAAGACCGAAAAGATAAGTCGCGTGCTCCCATCACTGCGAAGCTAATGGCCGACATGTTGACGACTGCTGGGTGCGACCATGTTATCACCATGGATTTGCACGCTTCTCAGATTCAAGGATTCTTTGATGTCCCAGTGGATAATTTGTATGCCGAGCCTAGTGTTGTTAGGTATATAAAGGAGAAAATAGATTACAAGAACGCAATAATCATTTCGCCGGATGCTGGTGGTGCCAAGAGAGCTGCAGGGCTCGCAGACAGGCTCGACTTGAACTTTGCATTGATTCACAAAGAGCGTGCAAAGGCAAACGAAGTCTCTAGAATGGTGTTGGTGGGTGACGTGAGCGATAAAGTTTGTGTTATTGTTGACGATATGGCAGACACATGTGGTACCTTGGCGAAAGCTGCAGAGGTTTTATTGGAGAACAATGCGAAAGAAGTGATTGCCATTGTAACACATGGTATTTTGTCTGGTAATGCCATGAAGAATATCAATAACTCTAAACTTGAGAGGGTCGTATGTACAAATACGGTTCCTTTTGAGGATAAGTTGAAGTTGTGCAACAAGTTGGATACCATTGATGTTTCAGCTGTTATTGCCGAGGCTATAAGGAGATTGCACAATGGTGAGAGTATCTCTTATTTGTTCAAAAATGCACCTTTATAA"
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+def iterate(length):
+    """
+    given a number
+    returns a list of length length
+    """
+    return  list(range(length))
+
+def batching(batch_size, data, alphabet):
+    """
+    creates a tensor of size batches of tokens 
+    """
+    concatenated_data = torch.cat(data)
+    #print(concatenated_data)
+    num_full_batches = len(concatenated_data)//batch_size
+    extra = len(concatenated_data)%batch_size
+    amt_padding = batch_size-extra
+    pad_token = token_index_aa["[PAD]"] if alphabet == 'aa' else token_index_codon["[PAD]"]
+    padding_list = [pad_token] * amt_padding
+    padding_tensor = torch.tensor(padding_list, dtype = torch.long)
+    concatenated_data = torch.cat((concatenated_data, padding_tensor))
+    data = concatenated_data.view(batch_size, num_full_batches+1)
+    return data.to(device)
 
 def data_process(fasta_file, batch_size, alphabet):
     """
@@ -86,16 +112,18 @@ def data_process(fasta_file, batch_size, alphabet):
     note that batch_size is inversely related to chunk_size
     """
     data_iterator = iter(list(SeqIO.parse(open(fasta_file), 'fasta')))
-    tokenized_data = [torch.tensor(encode_aa(data), dtype = torch.long) for data in data_iterator]
-    concatenated_data = torch.cat(tokenized_data)
-    chunk_size = len(concatenated_data)//batch_size
-    extra = len(concatenated_data)%batch_size
-    amt_padding = batch_size-extra
-    pad_token = token_index_aa["[PAD]"] if alphabet == 'aa' else token_index_codon["[PAD]"]
-    padding_list = [pad_token] * amt_padding
-    padding_tensor = torch.tensor(padding_list, dtype = torch.long)
-    concatenated_data = torch.cat((concatenated_data, padding_tensor))
-    data = concatenated_data.view(batch_size, chunk_size+1).t()
-    return data.to(device)
+    tokenizer_function = encode_aa if alphabet == 'aa' else encode_codon
 
-print(data_process('data/10K_codons_test.fasta', 1000, 'codon'))
+    #perform tokenization and convert it into a pytorch tensor
+    tokenized_data = [torch.tensor(tokenizer_function(str(data.seq)), dtype = torch.long) for data in data_iterator]
+    return batching(batch_size, tokenized_data, alphabet)
+
+def positional_encoding(fasta_file, batch_size, alphabet):
+    data_iterator = iter(list(SeqIO.parse(open(fasta_file), 'fasta')))
+    tokenizer_function = encode_aa if alphabet == 'aa' else encode_codon
+    data_iterator = iter(list(SeqIO.parse(open(fasta_file), 'fasta')))
+    indexed_data = [torch.tensor(iterate(len(tokenizer_function(str(data.seq))))) for data in data_iterator]
+    return batching(batch_size, indexed_data, alphabet)
+
+print(data_process('data/10K_codons_test.fasta', 512, 'codon').size())
+print(positional_encoding('data/10K_codons_test.fasta', 512, 'codon').size())
