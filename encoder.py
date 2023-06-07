@@ -1,5 +1,6 @@
 import numpy as np
-#import pytorch
+import torch
+from Bio import SeqIO
 
 chars_aa = 'ARNDCQEGHILKMFPSTWYVX'
 token_index_aa = {amino_acid:index for (index, amino_acid) in enumerate(chars_aa)}
@@ -70,3 +71,31 @@ def encode_codon(sequence):
     """
     codon_list = translation_window(sequence)
     return [token_index_codon['[START]']] + [token_index_codon[amino[codon]] for codon in codon_list] + [token_index_codon['[END]']]
+
+some_sentence = "ATGTCTACAAACTCGATAAAATTACTCGCCAGCGATGTGCATAGAGGACTCGCTGAATTAGTTGCGAGGAGGCTAGGTTTGCACATACTACCATGTGAGTTGAAAAGGGAATCCACGGGGGAAGTTCAATTCTCTATTGGGGAATCAGTTAGAGACGAAGATGTTTTTATTGTTTGTCAGATTGGTTCTGGCGAGGTAAATGACAGGGTGATTGAGCTCATGATCATGATTAACGCTTGTAAAACAGCTAGTGCTAGAAGAATCACCGTTATATTGCCAAACTTTCCTTACGCAAGACAAGACCGAAAAGATAAGTCGCGTGCTCCCATCACTGCGAAGCTAATGGCCGACATGTTGACGACTGCTGGGTGCGACCATGTTATCACCATGGATTTGCACGCTTCTCAGATTCAAGGATTCTTTGATGTCCCAGTGGATAATTTGTATGCCGAGCCTAGTGTTGTTAGGTATATAAAGGAGAAAATAGATTACAAGAACGCAATAATCATTTCGCCGGATGCTGGTGGTGCCAAGAGAGCTGCAGGGCTCGCAGACAGGCTCGACTTGAACTTTGCATTGATTCACAAAGAGCGTGCAAAGGCAAACGAAGTCTCTAGAATGGTGTTGGTGGGTGACGTGAGCGATAAAGTTTGTGTTATTGTTGACGATATGGCAGACACATGTGGTACCTTGGCGAAAGCTGCAGAGGTTTTATTGGAGAACAATGCGAAAGAAGTGATTGCCATTGTAACACATGGTATTTTGTCTGGTAATGCCATGAAGAATATCAATAACTCTAAACTTGAGAGGGTCGTATGTACAAATACGGTTCCTTTTGAGGATAAGTTGAAGTTGTGCAACAAGTTGGATACCATTGATGTTTCAGCTGTTATTGCCGAGGCTATAAGGAGATTGCACAATGGTGAGAGTATCTCTTATTTGTTCAAAAATGCACCTTTATAA"
+
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+def data_process(fasta_file, batch_size, alphabet):
+    """
+    Performs complete data_preprocessing of amino acid sequences in a fasta_file
+    including tokenization, concatenation, chunking, and padding
+    input: file_path (str) containing protein sequences (and ids)
+    output: set of pytorch tensors of batch_size, where the last is padded
+    
+    note that batch_size is inversely related to chunk_size
+    """
+    data_iterator = iter(list(SeqIO.parse(open(fasta_file), 'fasta')))
+    tokenized_data = [torch.tensor(encode_aa(data), dtype = torch.long) for data in data_iterator]
+    concatenated_data = torch.cat(tokenized_data)
+    chunk_size = len(concatenated_data)//batch_size
+    extra = len(concatenated_data)%batch_size
+    amt_padding = batch_size-extra
+    pad_token = token_index_aa["[PAD]"] if alphabet == 'aa' else token_index_codon["[PAD]"]
+    padding_list = [pad_token] * amt_padding
+    padding_tensor = torch.tensor(padding_list, dtype = torch.long)
+    concatenated_data = torch.cat((concatenated_data, padding_tensor))
+    data = concatenated_data.view(batch_size, chunk_size+1).t()
+    return data.to(device)
+
+print(data_process('data/10K_codons_test.fasta', 1000, 'codon'))
