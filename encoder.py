@@ -113,13 +113,14 @@ def iterate(length):
     """
     return  list(range(length))
 
-def batching(batch_size, data, alphabet):
+def batching(batch_size, data, alphabet, do_mask):
     """
     creates a tensor of size batches of tokens 
     """
     concatenated_data = torch.cat(data)
     #call to the masking function
-    concatenated_data = masking(concatenated_data, 0.15, alphabet)
+    if do_mask == True:
+        concatenated_data = masking(concatenated_data, 0.15, alphabet)
     num_full_batches = len(concatenated_data)//batch_size
     extra = len(concatenated_data)%batch_size
     amt_padding = batch_size-extra
@@ -130,7 +131,7 @@ def batching(batch_size, data, alphabet):
     data = concatenated_data.view(batch_size, num_full_batches+1)
     return data.to(device)
 
-def data_process(fasta_file, batch_size, alphabet):
+def data_process(fasta_file, batch_size, alphabet, do_mask):
     """
     Performs complete data_preprocessing of amino acid sequences in a fasta_file
     including tokenization, concatenation, chunking, and padding
@@ -145,9 +146,9 @@ def data_process(fasta_file, batch_size, alphabet):
 
     #perform tokenization and convert it into a pytorch tensor
     tokenized_data = [torch.tensor(tokenizer_function(str(data.seq)), dtype = torch.long) for data in data_iterator]
-    return batching(batch_size, tokenized_data, alphabet)
+    return batching(batch_size, tokenized_data, alphabet, do_mask)
 
-print(data_process("/Users/shornaalam/Documents/p_synt/data/10K_codons_test.fasta", 512, 'codon'))
+#print(data_process("/Users/shornaalam/Documents/p_synt/data/10K_codons_test.fasta", 512, 'codon'))
 
 #for positional_encodings:
 def indices_encoding(fasta_file, batch_size, alphabet):
@@ -155,4 +156,4 @@ def indices_encoding(fasta_file, batch_size, alphabet):
     tokenizer_function = encode_aa if alphabet == 'aa' else encode_codon
     data_iterator = iter(list(SeqIO.parse(open(fasta_file), 'fasta')))
     indexed_data = [torch.tensor(iterate(len(tokenizer_function(str(data.seq))))) for data in data_iterator]
-    return batching(batch_size, indexed_data, alphabet)
+    return batching(batch_size, indexed_data, alphabet, True)
