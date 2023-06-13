@@ -68,6 +68,7 @@ class TransformerModel (nn.Module):
 
     def forward(self, src):
         src = self.embedding(src) * math.sqrt(self.ninp)
+        
         src = self.pos_encoder(src)
         output = self.transformer_encoder(src)
         output = self.decoder(output)
@@ -129,5 +130,5 @@ def evaluate(model: nn.Module, eval_data: Tensor):
     out = out.topk(1).indices.view(-1)
     return out
 
-test_model =TransformerModel(512, '/Users/shornaalam/Documents/p_synt/data/10K_codons_test.fasta', 'codon')
+test_model =TransformerModel(512, '/data/10K_codons_test.fasta', 'codon')
 train(test_model)

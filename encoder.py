@@ -6,6 +6,7 @@ import random
 chars_aa = 'ARNDCQEGHILKMFPSTWYVX'
 token_index_aa = {amino_acid:index for (index, amino_acid) in enumerate(chars_aa)}
 
+#rewrite this
 for synonym_aa in 'OUBZ':
     token_index_aa[synonym_aa] = len(chars_aa)
 
