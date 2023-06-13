@@ -130,5 +130,5 @@ def evaluate(model: nn.Module, eval_data: Tensor):
     out = out.topk(1).indices.view(-1)
     return out
 
-test_model =TransformerModel(512, '/data/10K_codons_test.fasta', 'codon')
+test_model =TransformerModel(512, 'data/10K_codons_test.fasta', 'codon')
 train(test_model)
