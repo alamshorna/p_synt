@@ -16,13 +16,11 @@ def data_embedding(fasta_file, d_model, alphabet_string):
     embedding = nn.Embedding(len(token_index_codon), 1)
     size = embedding(data).size()
     data_embedding = embedding(data)
-    #.reshape([size[0], size[1]])
     return data_embedding
 
 #maximum_length
 class PositionalEncoding(nn.Module):
     def __init__(self, fasta_file, d_model, alphabet_string):
-    #def positional_encoding(fasta_file, d_model, alphabet_string):
         super(PositionalEncoding, self).__init__()
         indices = indices_encoding(fasta_file, d_model, alphabet_string)
         max_length = data_process(fasta_file, d_model, alphabet_string, True).size()[1]
@@ -32,19 +30,13 @@ class PositionalEncoding(nn.Module):
         pe[:, 0, 0::2] = torch.sin(position * div_term)
         pe[:, 0, 1::2] = torch.cos(position * div_term)
         size = pe.size()
-        #print('pe', size)
         self.pe = pe.reshape(size[2], size[0], size[1])
-        # print('pe', self.pe.size())
 
     def forward(self, embedding):
         embedding = embedding.t().unsqueeze(2)
+        # print(embedding.size())
+        # print('pe:  ',self.pe[:embedding.size(0)].size())
         embedding = embedding + self.pe[:embedding.size(0)]
-        print('pe', self.pe.size())
-        print('embedding_forward', embedding.size())
-        #print(self.pe.size(), embedding.size(0), self.pe[:embedding.size(0)])
-        #print(embedding.size(0))
-        print(self.pe[:embedding.size(0)].size())
-        #print(embedding.size())
         return embedding.squeeze(2).t()
     
 def number_sequences(fasta_file):
@@ -54,7 +46,6 @@ def number_sequences(fasta_file):
 class TransformerModel (nn.Module):
     def __init__(self, d_model, fasta_file, alphabet_string):
         super(TransformerModel, self).__init__()
-        #self(TransformerModel, self).__init__()
         self.model_type = 'Transformer'
         
         self.fasta_file = fasta_file
@@ -80,89 +71,70 @@ class TransformerModel (nn.Module):
 
     def forward(self, src):
         src = self.embedding(src) * math.sqrt(self.ninp)
-        # print('embedding', src.size())
         src = self.pos_encoder(src)
-        # print('positional_encoding', src.size())
         output = self.transformer_encoder(src)
-        # print('output', output)
-        # print('output', output.size())
         output = self.decoder(output)
         return output
-    
-# ntokens = len()  # size of vocabulary
-# emsize = 200  # embedding dimension
-# d_hid = 200  # dimension of the feedforward network model in ``nn.TransformerEncoder``
-# nlayers = 2  # number of ``nn.TransformerEncoderLayer`` in ``nn.TransformerEncoder``
-# nhead = 2  # number of heads in ``nn.MultiheadAttention``
-# dropout = 0.2  # dropout probability
-# model = TransformerModel(ntokens, emsize, nhead, d_hid, nlayers, dropout).to(device)
 
 import time
 
-# criterion = nn.CrossEntropyLoss()
-# lr = 5.0  # learning rate
-# optimizer = torch.optim.SGD(model.parameters(), lr=lr)
-# scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 1.0, gamma=0.95)
-
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-def train(model: nn.Module):
-    model.train()
-    epochs = 100
+def evaluate(model: nn.Module, eval_data, true_data, loss_function):
+    model.eval()
     total_loss = 0
-    log_interval = 5
+    with torch.no_grad():
+        for batch_number in range(eval_data.size(1)):
+            # print(batch_number)
+            # print(eval_data[:,batch_number].size())
+            out = model(eval_data[:,batch_number])
+            loss = loss_function(eval_data[batch_number], true_data[batch_number])
+            total_loss += loss
+    return total_loss/(batch_number+1)
+
+def train(model: nn.Module, eval_data, true_data):
+    model.train()
+    epochs = 30
+    total_loss = 0
+    log_interval = 1
     start_time = time.time()
-    learning_rate = 5.0
+    learning_rate = 0.1
     loss_function = nn.CrossEntropyLoss()
     optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
     data = data_process(model.fasta_file, model.d_model, model.alphabet, do_mask = True)
     correct_data = data_process(model.fasta_file, model.d_model, model.alphabet, do_mask = False)
     start_time = time.time()
-
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 1.0, gamma=0.95)
     
     for epoch in range(epochs):
         i = 0
         for batch in data:
-            optimizer.zero_grad()
-            #print(model)
-            
+        # print('data size: ', data.size())
+        # print('data size 1:', data.size(1))
+        # for batch_number in range(data.size(1)):
+            # batch = data[:, batch_number]
+            # print('train batch size:', batch.size())
             out = model(batch)
-            print(i)
-            print(batch)
-            print(out)
             i+=1
             loss = loss_function(out, batch)
-            print(loss)
             total_loss += loss
 
-            optimizer.zero_grad()
-            #loss.backward()
-            #torch.nn.utils.clip_grad_norm_(model.parameters(), 0.01)
-            print(loss)
-            optimizer.step()
-
-            
-            # if i % log_interval == 0 and i > 0:
-            #     lr = scheduler.get_last_lr()[0]
-            #     ms_per_batch = (time.time() - start_time) * 1000 / log_interval
-            #     cur_loss = total_loss / log_interval
-            #     print(cur_loss)
-            #     ppl = math.exp(cur_loss)
-            #     print(f'| epoch {epoch:3d} | '
-            #         f'lr {lr:02.2f} | ms/batch {ms_per_batch:5.2f} | '
-            #         f'loss {cur_loss:5.2f} | ppl {ppl:8.2f}')
-            #     total_loss = 0
-            #     start_time = time.time()
+            #optimizer.zero_grad()
+            loss = loss/512
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 0.01)
+            #print(i)
+            if i%512 == 0:
+                optimizer.step()
+                optimizer.zero_grad()
         
-        if epoch % log_interval == 5 or epoch == 0:
+        # print(evaluate(model, eval_data, true_data, loss_function))
+
+        if epoch % log_interval == 0 or epoch == 0:
             print("Epoch: {} -> loss: {}".format(epoch+1, total_loss/(len(data)*epoch+1)))
 
-def evaluate(model: nn.Module, eval_data: Tensor):
-    model.eval()
-    out = model(input.to(device))
-    out = out.topk(1).indices.view(-1)
-    return out
-
-test_model =TransformerModel(512, 'data/10K_codons_test.fasta', 'codon')
-train(test_model)
+test_model =TransformerModel(512, 'data/mini.fasta', 'codon')
+eval_data, true_data = data_process('data/mini_test.fasta', 512, 'codon', True), data_process('data/mini_test.fasta', 512, 'codon', False)
+# print('eval', eval_data.size(), 'true', true_data.size())
+train(test_model, eval_data, true_data)
+# evaluate(test_model, 'data/mini.fasta')
