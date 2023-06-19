@@ -129,8 +129,8 @@ def batching(batch_size, data, alphabet, do_mask):
     padding_list = [pad_token] * amt_padding
     padding_tensor = torch.tensor(padding_list, dtype = torch.long)
     concatenated_data = torch.cat((concatenated_data, padding_tensor))
-    data = concatenated_data.view(batch_size, num_full_batches+1)
-    return data.to(device)
+    #data = concatenated_data.view(batch_size, num_full_batches+1)
+    return concatenated_data
 
 def data_process(fasta_file, batch_size, alphabet, do_mask):
     """
@@ -147,14 +147,16 @@ def data_process(fasta_file, batch_size, alphabet, do_mask):
 
     #perform tokenization and convert it into a pytorch tensor
     tokenized_data = [torch.tensor(tokenizer_function(str(data.seq)), dtype = torch.long) for data in data_iterator]
+    #return tokenized_data
+    # off load the batching functionarlity to the pytorch dataloader
     return batching(batch_size, tokenized_data, alphabet, do_mask)
 
 #print(data_process("/Users/shornaalam/Documents/p_synt/data/10K_codons_test.fasta", 512, 'codon'))
 
-#for positional_encodings:
-def indices_encoding(fasta_file, batch_size, alphabet):
-    data_iterator = iter(list(SeqIO.parse(open(fasta_file), 'fasta')))
-    tokenizer_function = encode_aa if alphabet == 'aa' else encode_codon
-    data_iterator = iter(list(SeqIO.parse(open(fasta_file), 'fasta')))
-    indexed_data = [torch.tensor(iterate(len(tokenizer_function(str(data.seq))))) for data in data_iterator]
-    return batching(batch_size, indexed_data, alphabet, True)
+# #for positional_encodings:
+# def indices_encoding(fasta_file, batch_size, alphabet):
+#     data_iterator = iter(list(SeqIO.parse(open(fasta_file), 'fasta')))
+#     tokenizer_function = encode_aa if alphabet == 'aa' else encode_codon
+#     data_iterator = iter(list(SeqIO.parse(open(fasta_file), 'fasta')))
+#     indexed_data = [torch.tensor(iterate(len(tokenizer_function(str(data.seq))))) for data in data_iterator]
+#     return batching(batch_size, indexed_data, alphabet, True)
