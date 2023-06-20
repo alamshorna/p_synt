@@ -13,35 +13,23 @@ from torch.utils.data import Dataset, DataLoader
 from encoder import data_process, token_index_aa, token_index_codon
 
 class data_set(Dataset):
+    """
+    data_set class created for dataloading
+    simply calls the data_process function from encoder.py to initialize
+    """
     def __init__(self, fasta_file, batch_size, alphabet, do_mask):
         self.data = data_process(fasta_file, batch_size, alphabet, do_mask)
-        #self.ground_truth = data_process(fasta_file, batch_size, alphabet, False)
-  
+
     def __len__(self):
         return len(self.data)
   
     def __getitem__(self, index):
         return self.data[index]
-    
-#     def get(self, index):
-#         return self.data[index]
 
-
-
-
-# def data_embedding(fasta_file, d_model, alphabet_string):
-#     data = data_process(fasta_file, d_model, alphabet_string, True)
-#     embedding = nn.Embedding(len(token_index_codon), 1)
-#     size = embedding(data).size()
-#     data_embedding = embedding(data)
-#     return data_embedding
-
-#maximum_length
 class PositionalEncoding(nn.Module):
     def __init__(self, fasta_file, d_model, alphabet_string):
         super(PositionalEncoding, self).__init__()
-        #indices = indices_encoding(fasta_file, d_model, alphabet_string)
-        max_length = d_model #data_process(fasta_file, d_model, alphabet_string, True).size()[1]
+        max_length = d_model
         position = torch.arange(max_length).unsqueeze(1)
         div_term = torch.exp(torch.arange(0, d_model, 2) * (-math.log(10000.0) / d_model))
         pe = torch.zeros(max_length, 1, d_model)
@@ -76,7 +64,7 @@ class TransformerModel (nn.Module):
         self.embedding = nn.Embedding(self.ntoken, 512)
         self.decoder = nn.Linear(self.d_model, self.ntoken)
         self.init_weights()
-        self.satya = 'satya'
+        #self.satya = 'satya'
 
         self.epochs = 30
         
@@ -106,60 +94,43 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 def evaluate(model, eval_fasta, epoch):
     model.eval()
     total_loss = 0
-    eval_data = data_set(eval_fasta, 512, model.alphabet, True)
-    true_data = data_set(eval_fasta, 512, model.alphabet, False)
-    data_list, truth_list = list(enumerate(DataLoader(eval_data, 512))), list(enumerate(DataLoader(true_data, 512)))
-    #print(data_list, truth_list)
+    eval_data, eval_true = data_set(eval_fasta, 512, model.alphabet, True), data_set(eval_fasta, 512, model.alphabet, False)
+    eval_data_loader_list, eval_truth_loader_list = list(enumerate(DataLoader(eval_data, 512))), list(enumerate(DataLoader(eval_true, 512)))
     loss_function = nn.CrossEntropyLoss()
     losses = []
     with torch.no_grad():
-        for i in range(len(data_list)):
-            batch_values, truth_values = data_list[i][1], truth_list[i][1]
+        for i in range(len(eval_data_loader_list)):
+            batch_values, truth_values = eval_data_loader_list[i][1], eval_truth_loader_list[i][1]
             out = model(batch_values)
             loss = loss_function(out, truth_values)
             total_loss += loss
             losses.append(loss.item())
-        #print("Epoch: {} -> val loss: {}".format(epoch+1, total_loss/(len(data_list))*epoch+1))
-        print("Actual val loss", np.mean(losses), total_loss, (len(data_list))*epoch+1)
+        print("Val Loss", np.mean(losses), total_loss, (len(eval_data_loader_list))*epoch+1)
     return None
 
 def train(model, eval_fasta):
     model.train()
-    total_loss = 0
     data, true = data_set(model.fasta_file, 512, model.alphabet, True), data_set(model.fasta_file, 512, model.alphabet, False)
     dataloaderlist, truthloaderlist = list(enumerate(DataLoader(data, 512))), list(enumerate(DataLoader(true, 512)))
-    start_time = time.time()
+    #start_time = time.time()
     print('start train')
     for epoch in range(model.epochs):
         losses = []
-        i = 0
         for j in range(len(dataloaderlist)):
-            batch_values, truth_values = dataloaderlist[j][1], truthloaderlist[i][1]
+            batch_values, truth_values = dataloaderlist[j][1], truthloaderlist[j][1]
             out = model(batch_values)
-            i+=1
             loss = model.loss_function(out, truth_values)
-            # loss = loss/512
-            # print('train loss', loss)
-            
-            #print(loss.item())
-            losses.append(loss.item())# += loss
+            losses.append(loss.item())
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 0.01)
-            if i%100 == 0:
-                print('done !')
+            if j%100 == 0:
                 model.optimizer.step()
                 model.optimizer.zero_grad()
-        print(i)
-        # print(losses)
         evaluate(model, eval_fasta, epoch)
         model.train()
         if epoch % model.log_interval == 0 or epoch == 0:
             print("Epoch: {} -> loss: {}".format(epoch+1, np.mean(losses)))
-    #evaluate(model, eval_fasta, 30)
 
 test_model =TransformerModel(512, 'data/mini_aa.fasta', 'aa')
-# eval_data, true_data = data_process('data/mini_test.fasta', 512, 'codon', True), data_process('data/mini_test.fasta', 512, 'codon', False)
-# print('eval', eval_data.size(), 'true', true_data.size())
 eval_fasta = 'data/mini_test_aa.fasta'
 train(test_model, eval_fasta)
-# evaluate(test_model, 'data/mini.fasta')
