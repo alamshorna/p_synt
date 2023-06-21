@@ -1,7 +1,7 @@
 import math
 import os
-from tempfile import TemporaryDirectory
-from typing import Tuple
+#from tempfile import TemporaryDirectory
+#from typing import Tuple
 from Bio import SeqIO
 import numpy as np
 import wandb
@@ -139,20 +139,28 @@ def train(model, eval_fasta):
                 model.optimizer.zero_grad()
         model.train()
         if epoch % model.log_interval == 0 or epoch == 0:
-            print("Epoch: {} -> loss: {}".format(epoch+1, np.mean(losses)))
-            print("Val Loss:", evaluate(model, eval_fasta, epoch))
-            wandb.log({"accuracy": evaluate(model, eval_fasta, epoch),"loss": np.mean(losses)})
+            # print("Epoch: {} -> loss: {}".format(epoch+1, np.mean(losses)))
+            # print("Val Loss:", evaluate(model, eval_fasta, epoch))
+            epoch_loss = str(np.mean(losses))
+            val_loss = str(evaluate(model, eval_fasta, epoch))
+            print("Epoch", epoch+1, "loss", epoch_loss)
+            print("Validation Loss", val_loss)
+            out_file =  open('data/last_run.txt', 'w')
+            loss_string = "Epoch " + str(epoch+1) + ": loss " + epoch_loss + " val loss " + val_loss
+            out_file.write(loss_string)
+            out_file.close()
 
-wandb.login()
+
+# wandb.login()
 test_model =TransformerModel(512, 'data/mini_aa.fasta', 'aa', 'data/last_run.txt')
 eval_fasta = 'data/mini_test_aa.fasta'
-run = wandb.init(
-    # Set the project where this run will be logged
-    name = "transformer-model-test-run-06_21_23-alamshorna",
-    project= "nucleotide",
-    # Track hyperparameters and run metadata
-    config={
-        "learning_rate": test_model.learning_rate,
-        "epochs": test_model.epochs,
-    })
+# run = wandb.init(
+#     # Set the project where this run will be logged
+#     name = "transformer-model-test-run-06_21_23-alamshorna",
+#     project= "nucleotide",
+#     # Track hyperparameters and run metadata
+#     config={
+#         "learning_rate": test_model.learning_rate,
+#         "epochs": test_model.epochs,
+#     })
 train(test_model, eval_fasta)
