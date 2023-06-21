@@ -4,6 +4,7 @@ from tempfile import TemporaryDirectory
 from typing import Tuple
 from Bio import SeqIO
 import numpy as np
+import wandb
 
 import torch
 from torch import nn, Tensor
@@ -11,6 +12,13 @@ from torch.nn import TransformerEncoder, TransformerEncoderLayer
 from torch.utils.data import Dataset, DataLoader
 
 from encoder import data_process, token_index_aa, token_index_codon
+
+def to_one_hot(x, nin):
+    print(x, x.size())
+    one_hot = x.new(x.size(0), nin).float().zero_()
+    print(x.unsqueeze(1).size())
+    #one_hot.scatter_(2, x.unsqueeze(2), 1)
+    return one_hot
 
 class data_set(Dataset):
     """
@@ -48,7 +56,7 @@ def number_sequences(fasta_file):
     return len(fasta_file)
 
 class TransformerModel (nn.Module):
-    def __init__(self, d_model, fasta_file, alphabet_string):
+    def __init__(self, d_model, fasta_file, alphabet_string, save_location):
         super(TransformerModel, self).__init__()
         self.model_type = 'Transformer'
         
@@ -58,15 +66,16 @@ class TransformerModel (nn.Module):
         self.pos_encoder = PositionalEncoding(fasta_file, self.d_model, self.alphabet)
         #figure out inputs
         encoder_layer = TransformerEncoderLayer(d_model, 1)
-        self.transformer_encoder = TransformerEncoder(encoder_layer, 1)
+        self.transformer_encoder = TransformerEncoder(encoder_layer, 6)
         self.ninp = number_sequences(fasta_file)
         self.ntoken = len(token_index_aa) if alphabet_string == 'aa' else len(token_index_codon)
         self.embedding = nn.Embedding(self.ntoken, 512)
         self.decoder = nn.Linear(self.d_model, self.ntoken)
         self.init_weights()
+        self.save_location = save_location
         #self.satya = 'satya'
 
-        self.epochs = 30
+        self.epochs = 20
         
         self.log_interval = 1
         self.learning_rate = 0.01
@@ -85,6 +94,8 @@ class TransformerModel (nn.Module):
         src = self.pos_encoder(src)
         output = self.transformer_encoder(src)
         output = self.decoder(output)
+        #add softmax
+        #output = torch.nn.functional.softmax(output)
         return output
 
 import time
@@ -105,8 +116,8 @@ def evaluate(model, eval_fasta, epoch):
             loss = loss_function(out, truth_values)
             total_loss += loss
             losses.append(loss.item())
-        print("Val Loss", np.mean(losses), total_loss, (len(eval_data_loader_list))*epoch+1)
-    return None
+        #print("Val Loss", np.mean(losses), total_loss, (len(eval_data_loader_list))*epoch+1)
+    return np.mean(losses)
 
 def train(model, eval_fasta):
     model.train()
@@ -126,11 +137,22 @@ def train(model, eval_fasta):
             if j%100 == 0:
                 model.optimizer.step()
                 model.optimizer.zero_grad()
-        evaluate(model, eval_fasta, epoch)
         model.train()
         if epoch % model.log_interval == 0 or epoch == 0:
             print("Epoch: {} -> loss: {}".format(epoch+1, np.mean(losses)))
+            print("Val Loss:", evaluate(model, eval_fasta, epoch))
+            wandb.log({"accuracy": evaluate(model, eval_fasta, epoch),"loss": np.mean(losses)})
 
-test_model =TransformerModel(512, 'data/mini_aa.fasta', 'aa')
+wandb.login()
+test_model =TransformerModel(512, 'data/mini_aa.fasta', 'aa', 'data/last_run.txt')
 eval_fasta = 'data/mini_test_aa.fasta'
+run = wandb.init(
+    # Set the project where this run will be logged
+    name = "transformer-model-test-run-06_21_23-alamshorna",
+    project= "nucleotide",
+    # Track hyperparameters and run metadata
+    config={
+        "learning_rate": test_model.learning_rate,
+        "epochs": test_model.epochs,
+    })
 train(test_model, eval_fasta)

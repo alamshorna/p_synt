@@ -1,0 +1,16 @@
+
+start train
+Epoch: 1 -> loss: 4.504300966050406
+Val Loss: 3.776286918117154
+Epoch: 2 -> loss: 3.3567382502324374
+Val Loss: 3.291616217551693
+Traceback (most recent call last):
+  File "/Users/shornaalam/Documents/p_synt/model.py", line 157, in <module>
+    train(test_model, eval_fasta)
+  File "/Users/shornaalam/Documents/p_synt/model.py", line 135, in train
+    loss.backward()
+  File "/Users/shornaalam/Documents/Jupyter/miniconda3/envs/p_synlm/lib/python3.11/site-packages/torch/_tensor.py", line 487, in backward
+    torch.autograd.backward(
+  File "/Users/shornaalam/Documents/Jupyter/miniconda3/envs/p_synlm/lib/python3.11/site-packages/torch/autograd/__init__.py", line 200, in backward
+    Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
+KeyboardInterrupt

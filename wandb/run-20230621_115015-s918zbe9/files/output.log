@@ -1,0 +1,36 @@
+
+start train
+Traceback (most recent call last):
+  File "/Users/shornaalam/Documents/p_synt/model.py", line 157, in <module>
+    train(test_model, eval_fasta)
+  File "/Users/shornaalam/Documents/p_synt/model.py", line 132, in train
+    out = model(batch_values)
+          ^^^^^^^^^^^^^^^^^^^
+  File "/Users/shornaalam/Documents/Jupyter/miniconda3/envs/p_synlm/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1501, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/shornaalam/Documents/p_synt/model.py", line 95, in forward
+    output = self.transformer_encoder(src)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/shornaalam/Documents/Jupyter/miniconda3/envs/p_synlm/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1501, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/shornaalam/Documents/Jupyter/miniconda3/envs/p_synlm/lib/python3.11/site-packages/torch/nn/modules/transformer.py", line 315, in forward
+    output = mod(output, src_mask=mask, is_causal=is_causal, src_key_padding_mask=src_key_padding_mask_for_layers)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/shornaalam/Documents/Jupyter/miniconda3/envs/p_synlm/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1501, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/shornaalam/Documents/Jupyter/miniconda3/envs/p_synlm/lib/python3.11/site-packages/torch/nn/modules/transformer.py", line 592, in forward
+    x = self.norm2(x + self._ff_block(x))
+                       ^^^^^^^^^^^^^^^^^
+  File "/Users/shornaalam/Documents/Jupyter/miniconda3/envs/p_synlm/lib/python3.11/site-packages/torch/nn/modules/transformer.py", line 607, in _ff_block
+    x = self.linear2(self.dropout(self.activation(self.linear1(x))))
+                                                  ^^^^^^^^^^^^^^^
+  File "/Users/shornaalam/Documents/Jupyter/miniconda3/envs/p_synlm/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1501, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/shornaalam/Documents/Jupyter/miniconda3/envs/p_synlm/lib/python3.11/site-packages/torch/nn/modules/linear.py", line 114, in forward
+    return F.linear(input, self.weight, self.bias)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+KeyboardInterrupt
