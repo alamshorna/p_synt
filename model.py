@@ -145,24 +145,25 @@ def train(model, eval_fasta):
             val_loss = str(evaluate(model, eval_fasta, epoch))
             print("Epoch", epoch+1, "loss", epoch_loss)
             print("Validation Loss", val_loss)
+            wandb.log({"loss": epoch_loss, "val loss": val_loss})
             out_file =  open('data/last_run.txt', 'a')
             loss_string = "Epoch " + str(epoch+1) + ": loss " + epoch_loss + " val loss " + val_loss + "\n"
             out_file.write(loss_string)
             out_file.close()
 
 
-# wandb.login()
+wandb.login()
 test_model =TransformerModel(512, 'data/19.9K_proteins.fasta', 'aa', 'data/last_run.txt')
 eval_fasta = 'data/10K_proteins_test.fasta'
-# run = wandb.init(
-#     # Set the project where this run will be logged
-#     name = "transformer-model-test-run-06_21_23-alamshorna",
-#     project= "nucleotide",
-#     # Track hyperparameters and run metadata
-#     config={
-#         "learning_rate": test_model.learning_rate,
-#         "epochs": test_model.epochs,
-#     })
+run = wandb.init(
+    # Set the project where this run will be logged
+    name = "transformer-model-19.9K-aa-run-06_22_23-alamshorna",
+    project= "nucleotide",
+    # Track hyperparameters and run metadata
+    config={
+        "learning_rate": test_model.learning_rate,
+        "epochs": test_model.epochs,
+    })
 
 #clear the out file, add the experiment name at the top
 out_file_name = "data/last_run.txt"
