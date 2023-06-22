@@ -1,1 +1,1 @@
-transformer-model-20K-aa-run-06_22_23-alamshorna
+transformer-model-19.9K-aa-run-06_22_23-alamshorna

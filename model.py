@@ -152,7 +152,7 @@ def train(model, eval_fasta):
 
 
 # wandb.login()
-test_model =TransformerModel(512, 'data/20K_proteins.fasta', 'aa', 'data/last_run.txt')
+test_model =TransformerModel(512, 'data/19.9K_proteins.fasta', 'aa', 'data/last_run.txt')
 eval_fasta = 'data/10K_proteins_test.fasta'
 # run = wandb.init(
 #     # Set the project where this run will be logged
@@ -166,7 +166,7 @@ eval_fasta = 'data/10K_proteins_test.fasta'
 
 #clear the out file, add the experiment name at the top
 out_file_name = "data/last_run.txt"
-experiment_name = "transformer-model-20K-aa-run-06_22_23-alamshorna"
+experiment_name = "transformer-model-19.9K-aa-run-06_22_23-alamshorna"
 #clears the current contents of the file
 open(out_file_name, 'w').close()
 out_file = open(out_file_name, 'w')
