@@ -145,7 +145,7 @@ def train(model, eval_fasta):
             val_loss = str(evaluate(model, eval_fasta, epoch))
             print("Epoch", epoch+1, "loss", epoch_loss)
             print("Validation Loss", val_loss)
-            wandb.log({"loss": epoch_loss, "val loss": val_loss})
+            wandb.log({"loss": float(epoch_loss), "val loss": float(val_loss)})
             out_file =  open('data/last_run.txt', 'a')
             loss_string = "Epoch " + str(epoch+1) + ": loss " + epoch_loss + " val loss " + val_loss + "\n"
             out_file.write(loss_string)
@@ -153,11 +153,11 @@ def train(model, eval_fasta):
 
 
 wandb.login()
-test_model =TransformerModel(512, 'data/19.9K_proteins.fasta', 'aa', 'data/last_run.txt')
-eval_fasta = 'data/10K_proteins_test.fasta'
+test_model =TransformerModel(512, 'data/mini_aa.fasta', 'aa', 'data/last_run.txt')
+eval_fasta = 'data/mini_test_aa.fasta'
 run = wandb.init(
     # Set the project where this run will be logged
-    name = "transformer-model-19.9K-aa-run-06_22_23-alamshorna",
+    name = "transformer-model-mini-aa-run-06_22_23-alamshorna",
     project= "nucleotide",
     # Track hyperparameters and run metadata
     config={
@@ -167,7 +167,7 @@ run = wandb.init(
 
 #clear the out file, add the experiment name at the top
 out_file_name = "data/last_run.txt"
-experiment_name = "transformer-model-19.9K-aa-run-06_22_23-alamshorna"
+experiment_name = "transformer-model-mini-aa-run-06_22_23-alamshorna"
 #clears the current contents of the file
 open(out_file_name, 'w').close()
 out_file = open(out_file_name, 'w')
