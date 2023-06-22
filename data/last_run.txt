@@ -1,1 +1,1 @@
-Epoch 1: loss 5.82483688454707 val loss 3.889377696667948
+transformer-model-20K-aa-run-06_22_23-alamshorna

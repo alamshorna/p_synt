@@ -1,0 +1,27 @@
+2023-06-21 14:32:14,524 INFO    MainThread:2260022 [wandb_setup.py:_flush():76] Loading settings from /afs/csail.mit.edu/u/s/shorna/.config/wandb/settings
+2023-06-21 14:32:14,525 INFO    MainThread:2260022 [wandb_setup.py:_flush():76] Loading settings from /afs/csail.mit.edu/u/s/shorna/p_synt/wandb/settings
+2023-06-21 14:32:14,525 INFO    MainThread:2260022 [wandb_setup.py:_flush():76] Loading settings from environment variables: {}
+2023-06-21 14:32:14,526 INFO    MainThread:2260022 [wandb_setup.py:_flush():76] Inferring run settings from compute environment: {'program_relpath': 'model.py', 'program': 'model.py'}
+2023-06-21 14:32:14,526 INFO    MainThread:2260022 [wandb_init.py:_log_setup():428] Logging user logs to /afs/csail.mit.edu/u/s/shorna/p_synt/wandb/run-20230621_143214-29tttk47/logs/debug.log
+2023-06-21 14:32:14,526 INFO    MainThread:2260022 [wandb_init.py:_log_setup():429] Logging internal logs to /afs/csail.mit.edu/u/s/shorna/p_synt/wandb/run-20230621_143214-29tttk47/logs/debug-internal.log
+2023-06-21 14:32:14,526 INFO    MainThread:2260022 [wandb_init.py:init():462] calling init triggers
+2023-06-21 14:32:14,527 INFO    MainThread:2260022 [wandb_init.py:init():466] wandb.init called with sweep_config: {}
+config: {'learning_rate': 0.01, 'epochs': 20}
+2023-06-21 14:32:14,527 INFO    MainThread:2260022 [wandb_init.py:init():515] starting backend
+2023-06-21 14:32:14,527 INFO    MainThread:2260022 [backend.py:_multiprocessing_setup():99] multiprocessing start_methods=fork,spawn,forkserver, using: spawn
+2023-06-21 14:32:14,556 INFO    MainThread:2260022 [backend.py:ensure_launched():217] starting backend process...
+2023-06-21 14:32:14,571 INFO    MainThread:2260022 [backend.py:ensure_launched():222] started backend process with pid: 2260348
+2023-06-21 14:32:14,573 INFO    MainThread:2260022 [wandb_init.py:init():525] backend started and connected
+2023-06-21 14:32:14,580 INFO    MainThread:2260022 [wandb_init.py:init():596] updated telemetry
+2023-06-21 14:32:14,608 INFO    MainThread:2260022 [wandb_init.py:init():628] communicating run to backend with 30 second timeout
+2023-06-21 14:32:16,032 INFO    MainThread:2260022 [wandb_run.py:_on_init():1924] communicating current version
+2023-06-21 14:32:16,141 INFO    MainThread:2260022 [wandb_run.py:_on_init():1928] got version response upgrade_message: "wandb version 0.15.4 is available!  To upgrade, please run:\n $ pip install wandb --upgrade"
+
+2023-06-21 14:32:16,141 INFO    MainThread:2260022 [wandb_init.py:init():662] starting run threads in backend
+2023-06-21 14:32:21,172 INFO    MainThread:2260022 [wandb_run.py:_console_start():1898] atexit reg
+2023-06-21 14:32:21,174 INFO    MainThread:2260022 [wandb_run.py:_redirect():1771] redirect: SettingsConsole.REDIRECT
+2023-06-21 14:32:21,175 INFO    MainThread:2260022 [wandb_run.py:_redirect():1776] Redirecting console.
+2023-06-21 14:32:21,179 INFO    MainThread:2260022 [wandb_run.py:_redirect():1832] Redirects installed.
+2023-06-21 14:32:21,179 INFO    MainThread:2260022 [wandb_init.py:init():688] run started, returning control to user process
+2023-06-21 14:51:58,458 INFO    MainThread:2260022 [wandb_run.py:_atexit_cleanup():1867] got exitcode: 255
+2023-06-21 14:51:58,462 INFO    MainThread:2260022 [wandb_run.py:_restore():1839] restore

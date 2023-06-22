@@ -74,7 +74,7 @@ class Uniprot21(Alphabet):
         encodes all characters as a byte string
         uses np.arange() to split this byte encoding into individual tokens
         """
-        chars = b'ARNDCQEGHILKMFPSTWYVXOUBZ'
+        chars = b'ARNDCQEGHILKMFPSTWYVXOUBZJ'
         #processing_tokens = ['[START]', '[END]', '[PAD]']
         encoding = np.arange(len(chars))
         encoding[21:] = [11, 4, 20, 20]  # encode 'OUBZ' as synonyms
