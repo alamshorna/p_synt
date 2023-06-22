@@ -1,0 +1,34 @@
+{
+    "os": "macOS-12.4-arm64-arm-64bit",
+    "python": "3.11.3",
+    "heartbeatAt": "2023-06-22T22:22:13.860213",
+    "startedAt": "2023-06-22T22:22:13.516657",
+    "docker": null,
+    "cuda": null,
+    "args": [],
+    "state": "running",
+    "program": "/Users/shornaalam/Documents/p_synt/model.py",
+    "codePath": "model.py",
+    "git": {
+        "remote": "https://github.com/alamshorna/p_synt.git",
+        "commit": "294af25ba8c4e9a5c42266c27f7405ebf2835ba6"
+    },
+    "email": "shorna@mit.edu",
+    "root": "/Users/shornaalam/Documents/p_synt",
+    "host": "31-38-39.wireless.csail.mit.edu",
+    "username": "shornaalam",
+    "executable": "/Users/shornaalam/Documents/Jupyter/miniconda3/envs/p_synlm/bin/python",
+    "cpu_count": 8,
+    "cpu_count_logical": 8,
+    "disk": {
+        "total": 460.4317207336426,
+        "used": 212.80171585083008
+    },
+    "gpuapple": {
+        "type": "arm",
+        "vendor": "Apple"
+    },
+    "memory": {
+        "total": 16.0
+    }
+}
