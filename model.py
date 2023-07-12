@@ -5,20 +5,22 @@ import os
 from Bio import SeqIO
 import numpy as np
 import wandb
+import seaborn
+import matplotlib.pyplot as plt
 
 import torch
 from torch import nn, Tensor
 from torch.nn import TransformerEncoder, TransformerEncoderLayer
 from torch.utils.data import Dataset, DataLoader
 
-from encoder import data_process, token_index_aa, token_index_codon
+from encoder import data_process, token_index_aa, token_index_codon, baseline
 
-def to_one_hot(x, nin):
-    print(x, x.size())
-    one_hot = x.new(x.size(0), nin).float().zero_()
-    print(x.unsqueeze(1).size())
-    #one_hot.scatter_(2, x.unsqueeze(2), 1)
-    return one_hot
+# def to_one_hot(x, nin):
+#     print(x, x.size())
+#     one_hot = x.new(x.size(0), nin).float().zero_()
+#     print(x.unsqueeze(1).size())
+#     #one_hot.scatter_(2, x.unsqueeze(2), 1)
+#     return one_hot
 
 class data_set(Dataset):
     """
@@ -26,6 +28,7 @@ class data_set(Dataset):
     simply calls the data_process function from encoder.py to initialize
     """
     def __init__(self, fasta_file, batch_size, alphabet, do_mask):
+        #print(fasta_file)
         self.data = data_process(fasta_file, batch_size, alphabet, do_mask)
 
     def __len__(self):
@@ -74,13 +77,11 @@ class TransformerModel (nn.Module):
         self.init_weights()
         self.save_location = save_location
         #self.satya = 'satya'
-
         self.epochs = 20
-        
         self.log_interval = 1
-        self.learning_rate = 0.01
+        self.learning_rate = 0.0001 
         self.loss_function = nn.CrossEntropyLoss()
-        self.optimizer = torch.optim.AdamW(self.parameters(), lr=self.learning_rate)
+        self.optimizer = torch.optim.AdamW(self.parameters(), lr=self.learning_rate, weight_decay=0.1)
         self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, 1.0, gamma=0.95)
 
     def init_weights(self):
@@ -102,75 +103,119 @@ import time
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-def evaluate(model, eval_fasta, epoch):
+def prob_dist_avg(list, tokens):
+    """
+    place holder function to be replaced by some fancy numpy nonsense once I have wifi
+    simply takes a list of probability distribution and performs and index-wise average
+    """
+    if len(list) == 0:
+        return [0] * len(tokens)
+    average = [0 for index in range(len(list[0]))]
+    for distribution in list:
+        for index in range(len(distribution)):
+            average[index] += distribution[index]
+    average = [total/len(list) for total in average]
+    return average
+
+def evaluate(model, eval_fasta, alphabet):
     model.eval()
-    total_loss = 0
     eval_data, eval_true = data_set(eval_fasta, 512, model.alphabet, True), data_set(eval_fasta, 512, model.alphabet, False)
-    eval_data_loader_list, eval_truth_loader_list = list(enumerate(DataLoader(eval_data, 512))), list(enumerate(DataLoader(eval_true, 512)))
+    eval_data_loader_list, eval_truth_loader_list = list(DataLoader(eval_data, 512)), list(DataLoader(eval_true, 512))
     loss_function = nn.CrossEntropyLoss()
+    tokens = token_index_aa if alphabet == 'aa' else token_index_codon
+    mask_token = tokens['[MASK]']
+    replacement_distributions, counts = {token:[] for token in range(len(tokens))}, {token:0 for token in range(len(tokens))}
     losses = []
     with torch.no_grad():
         for i in range(len(eval_data_loader_list)):
-            batch_values, truth_values = eval_data_loader_list[i][1], eval_truth_loader_list[i][1]
+            batch_values, truth_values = eval_data_loader_list[i], eval_truth_loader_list[i]
             out = model(batch_values)
-            loss = loss_function(out, truth_values)
-            total_loss += loss
-            losses.append(loss.item())
-        #print("Val Loss", np.mean(losses), total_loss, (len(eval_data_loader_list))*epoch+1)
+            for k in range(len(batch_values)):
+                current_letter = batch_values[k].item()
+                true_letter = truth_values[k].item()
+                if current_letter == mask_token:
+                    counts[true_letter] += 1
+                    dist = nn.functional.softmax(out[k]).tolist()
+                    replacement_distributions[true_letter].append(dist)
+                    #print(out[k], torch.tensor(true_letter))
+                loss = loss_function(out[k], torch.tensor(true_letter))
+                losses.append(loss.item())
+            # for y in range(len(out.tolist())):
+            #     loss = loss_function(out[y], truth_values[y])
+            #     losses.append(loss.item())
+            #loss = loss_function(out, truth_values)
+            # loss = loss_function(out, truth_values)
+            # losses.append(loss.item())
+            
+        replacement_distributions = [prob_dist_avg(replacement_distributions[dist_list], tokens) for dist_list in replacement_distributions]
+        replacement_distributions = np.array([np.array(dist) for dist in replacement_distributions])
+        #print(counts)
+        seaborn.heatmap(replacement_distributions)
+        plt.show()
+    
     return np.mean(losses)
 
-def train(model, eval_fasta):
+def train(model, eval_fasta, alphabet):
     model.train()
     data, true = data_set(model.fasta_file, 512, model.alphabet, True), data_set(model.fasta_file, 512, model.alphabet, False)
-    dataloaderlist, truthloaderlist = list(enumerate(DataLoader(data, 512))), list(enumerate(DataLoader(true, 512)))
-    #start_time = time.time()
-    print('start train')
+    dataloaderlist, truthloaderlist = list(DataLoader(data, 512)), list(DataLoader(true, 512))
+    tokens = token_index_aa if alphabet == 'aa' else token_index_codon
+    mask_token = tokens['[MASK]']
+    #print(baseline(truthloaderlist, 'aa'))
+    #print('start train')
     for epoch in range(model.epochs):
         losses = []
+        #print(len(dataloaderlist))
         for j in range(len(dataloaderlist)):
-            batch_values, truth_values = dataloaderlist[j][1], truthloaderlist[j][1]
+            batch_values, truth_values = dataloaderlist[j], truthloaderlist[j]
             out = model(batch_values)
-            loss = model.loss_function(out, truth_values)
-            losses.append(loss.item())
-            loss.backward()
+            for k in range(len(batch_values)):
+                if batch_values[k] == mask_token:
+                    loss = model.loss_function(out[k], torch.tensor(truth_values[k].item()))
+                    losses.append(loss.item())
+                    loss.backward()
+            # loss = model.loss_function(out, truth_values)
+            # losses.append(loss.item())
+            # loss.backward()
+
             torch.nn.utils.clip_grad_norm_(model.parameters(), 0.01)
-            if j%100 == 0:
+            if j%1 == 0:
+                #print(loss)
                 model.optimizer.step()
                 model.optimizer.zero_grad()
-        model.train()
+            model.train()
         if epoch % model.log_interval == 0 or epoch == 0:
             # print("Epoch: {} -> loss: {}".format(epoch+1, np.mean(losses)))
             # print("Val Loss:", evaluate(model, eval_fasta, epoch))
             epoch_loss = str(np.mean(losses))
-            val_loss = str(evaluate(model, eval_fasta, epoch))
+            val_loss = str(evaluate(model, eval_fasta, alphabet))
             print("Epoch", epoch+1, "loss", epoch_loss)
             print("Validation Loss", val_loss)
-            wandb.log({"loss": float(epoch_loss), "val loss": float(val_loss)})
+            # wandb.log({"loss": float(epoch_loss), "val loss": float(val_loss)})
             out_file =  open('data/last_run.txt', 'a')
             loss_string = "Epoch " + str(epoch+1) + ": loss " + epoch_loss + " val loss " + val_loss + "\n"
             out_file.write(loss_string)
             out_file.close()
 
-
-wandb.login()
-test_model =TransformerModel(512, 'data/mini_aa.fasta', 'aa', 'data/last_run.txt')
-eval_fasta = 'data/mini_test_aa.fasta'
-run = wandb.init(
-    # Set the project where this run will be logged
-    name = "transformer-model-mini-aa-run-06_22_23-alamshorna",
-    project= "nucleotide",
-    # Track hyperparameters and run metadata
-    config={
-        "learning_rate": test_model.learning_rate,
-        "epochs": test_model.epochs,
-    })
+# wandb.login()
+test_model =TransformerModel(512, 'data/micro_aa.fasta', 'aa', 'data/last_run.txt')
+eval_fasta = 'data/micro_test_aa.fasta'
+# run = wandb.init(
+#     # Set the project where this run will be logged
+#     name = "transformer-model-human-aa-07_04_23-alamshorna",
+#     project= "nucleotide",
+#     # Track hyperparameters and run metadata
+#     config={
+#         "learning_rate": test_model.learning_rate,
+#         "epochs": test_model.epochs,
+#     })
 
 #clear the out file, add the experiment name at the top
 out_file_name = "data/last_run.txt"
-experiment_name = "transformer-model-mini-aa-run-06_22_23-alamshorna"
+experiment_name = "transformer-model-human-aa-07_04_23-alamshorna"
 #clears the current contents of the file
 open(out_file_name, 'w').close()
 out_file = open(out_file_name, 'w')
 out_file.write(experiment_name + "\n")
 out_file.close()
-train(test_model, eval_fasta)
+train(test_model, eval_fasta, 'aa')

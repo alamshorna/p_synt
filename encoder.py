@@ -6,12 +6,10 @@ import random
 chars_aa = 'ARNDCQEGHILKMFPSTWYVX'
 token_index_aa = {amino_acid:index for (index, amino_acid) in enumerate(chars_aa)}
 
-#rewrite this
-for synonym_aa in 'OUBZ':
-    token_index_aa[synonym_aa] = len(chars_aa)
+#encode synonyms
+token_index_aa['O'], token_index_aa['U'], token_index_aa['B'], token_index_aa['Z'] = 11, 4, 20, 20
 
 #added a "[PAD]" token separately in the token dictionary (as in proteinBERT)
-#alternative option: set to 0, as with the nn.embedding() function
 extra_tokens = ['[START]', '[END]', '[PAD]', '[MASK]']
 for i in range(len(extra_tokens)):
     token_index_aa[extra_tokens[i]] = len(chars_aa) + i
@@ -48,6 +46,20 @@ amino = {"TTT":"F", "TTC":"F", "TTA":"L", "TTG":"L",
     "GAT":"D", "GAC":"D", "GAA":"E", "GAG":"E",
     "GGT":"G", "GGC":"G", "GGA":"G", "GGG":"G"}
 
+
+def baseline(truthloaderlist, alphabet):
+    #print(truthloaderlist)
+    chars = chars_aa if alphabet == 'aa' else chars_codon
+    frequencies = {i:0 for i in range(len(chars)+3)}
+    current_batch_freq = {}
+    for batch in truthloaderlist:
+        batch = batch.tolist()
+        #print(batch)
+        current_batch_freq = {token:batch.count(token) for token in batch}
+        for token in current_batch_freq:
+            frequencies[token] += batch.count(token)
+    return frequencies
+
 def translation_window(sequence):
     """
     separate a raw DNA sequence into a codons
@@ -75,13 +87,20 @@ def encode_codon(sequence):
     """
     codon_list = translation_window(sequence)
     return [token_index_codon['[START]']] + [token_index_codon[amino[codon]] for codon in codon_list] + [token_index_codon['[END]']]
-    tokens = [token_index_codon['[START]']] + [token_index_codon[amino[codon]] for codon in codon_list] + [token_index_codon['[END]']]
-    return (tokens, len(tokens))
 
 
 some_sentence = "ATGTCTACAAACTCGATAAAATTACTCGCCAGCGATGTGCATAGAGGACTCGCTGAATTAGTTGCGAGGAGGCTAGGTTTGCACATACTACCATGTGAGTTGAAAAGGGAATCCACGGGGGAAGTTCAATTCTCTATTGGGGAATCAGTTAGAGACGAAGATGTTTTTATTGTTTGTCAGATTGGTTCTGGCGAGGTAAATGACAGGGTGATTGAGCTCATGATCATGATTAACGCTTGTAAAACAGCTAGTGCTAGAAGAATCACCGTTATATTGCCAAACTTTCCTTACGCAAGACAAGACCGAAAAGATAAGTCGCGTGCTCCCATCACTGCGAAGCTAATGGCCGACATGTTGACGACTGCTGGGTGCGACCATGTTATCACCATGGATTTGCACGCTTCTCAGATTCAAGGATTCTTTGATGTCCCAGTGGATAATTTGTATGCCGAGCCTAGTGTTGTTAGGTATATAAAGGAGAAAATAGATTACAAGAACGCAATAATCATTTCGCCGGATGCTGGTGGTGCCAAGAGAGCTGCAGGGCTCGCAGACAGGCTCGACTTGAACTTTGCATTGATTCACAAAGAGCGTGCAAAGGCAAACGAAGTCTCTAGAATGGTGTTGGTGGGTGACGTGAGCGATAAAGTTTGTGTTATTGTTGACGATATGGCAGACACATGTGGTACCTTGGCGAAAGCTGCAGAGGTTTTATTGGAGAACAATGCGAAAGAAGTGATTGCCATTGTAACACATGGTATTTTGTCTGGTAATGCCATGAAGAATATCAATAACTCTAAACTTGAGAGGGTCGTATGTACAAATACGGTTCCTTTTGAGGATAAGTTGAAGTTGTGCAACAAGTTGGATACCATTGATGTTTCAGCTGTTATTGCCGAGGCTATAAGGAGATTGCACAATGGTGAGAGTATCTCTTATTTGTTCAAAAATGCACCTTTATAA"
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+def to_dict(list):
+    new_dict = {}
+    for char in list:
+        if char in new_dict.keys():
+            new_dict[char] += 1
+        else:
+            new_dict[char] = 0
+    return new_dict
 
 #masking function
 def masking(data, masking_proportion, alphabet):
@@ -90,21 +109,27 @@ def masking(data, masking_proportion, alphabet):
     returns data with indices masked
     """
     #will mask start and end tokens freely among the chosen 15%
+    #print('performing masking')
+    data = list(data)
     amt_data = len(data)
     num_desired = int(masking_proportion*amt_data)
     to_be_masked = torch.randint(amt_data-1, (num_desired,))
-    chosen_indices = [random.sample(list(range(amt_data)), num_desired)]
-    masking_choices = [random.choices(['null', 'correct', 'incorrect'], [.8, .1, .1], k=num_desired)]
+    chosen_indices = random.sample(list(range(amt_data)), num_desired)
+    #print(chosen_indices)
+    masking_choices = random.choices(['null', 'correct', 'incorrect'], [.8, .1, .1], k=num_desired)
     alphabet_dictionary = token_index_aa if alphabet == 'aa' else token_index_codon
+    #print('masked indices', len(chosen_indices))
     for i in range(len(chosen_indices)):
+        # if data[chosen_indices[i]] == 'A':
+        #     data[chosen_indices[i]] = token_index_aa['[MASK]']
         if masking_choices[i] == 'null':
-            data[chosen_indices[i]] = '[MASK]'
+            data[chosen_indices[i]] = token_index_aa['[MASK]']
         elif masking_choices[i] == 'correct':
             pass
         elif masking_choices[i] == 'incorrect':
             #rewrite to not include the correct amino acid
-            data[chosen_indices[i]] = alphabet_dictionary[random.choice(list(range(0, len(alphabet_dictionary)-1)))]
-    return data
+            data[chosen_indices[i]] = alphabet_dictionary[random.choice(list(alphabet_dictionary.keys()))]
+    return torch.tensor(data)
     
 
 def iterate(length):
@@ -121,7 +146,7 @@ def batching(batch_size, data, alphabet, do_mask):
     concatenated_data = torch.cat(data)
     #call to the masking function
     if do_mask == True:
-        concatenated_data = masking(concatenated_data, 0.15, alphabet)
+        concatenated_data = masking(concatenated_data, 0.5, alphabet)
     num_full_batches = len(concatenated_data)//batch_size
     extra = len(concatenated_data)%batch_size
     amt_padding = batch_size-extra
