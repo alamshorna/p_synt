@@ -115,20 +115,24 @@ def masking(data, masking_proportion, alphabet):
     num_desired = int(masking_proportion*amt_data)
     to_be_masked = torch.randint(amt_data-1, (num_desired,))
     chosen_indices = random.sample(list(range(amt_data)), num_desired)
-    #print(chosen_indices)
     masking_choices = random.choices(['null', 'correct', 'incorrect'], [.8, .1, .1], k=num_desired)
     alphabet_dictionary = token_index_aa if alphabet == 'aa' else token_index_codon
-    #print('masked indices', len(chosen_indices))
-    for i in range(len(chosen_indices)):
-        # if data[chosen_indices[i]] == 'A':
+    # for i in range(len(chosen_indices)):
+    #     if data[chosen_indices[i]] == 0:
+    #         #print('masked alanine')
+    #         data[chosen_indices[i]] = token_index_aa['[MASK]']
+    
+    for i in range(len(data)):
+        if (data[i] == 0 or data[i] == 18)and random.random()<=0.2:
+            data[i] = token_index_aa['[MASK]']
+        # if masking_choices[i] == 'null':
         #     data[chosen_indices[i]] = token_index_aa['[MASK]']
-        if masking_choices[i] == 'null':
-            data[chosen_indices[i]] = token_index_aa['[MASK]']
-        elif masking_choices[i] == 'correct':
-            pass
-        elif masking_choices[i] == 'incorrect':
-            #rewrite to not include the correct amino acid
-            data[chosen_indices[i]] = alphabet_dictionary[random.choice(list(alphabet_dictionary.keys()))]
+        # elif masking_choices[i] == 'correct':
+        #     pass
+        # elif masking_choices[i] == 'incorrect':
+        #     #rewrite to not include the correct amino acid
+        #     data[chosen_indices[i]] = alphabet_dictionary[random.choice(list(alphabet_dictionary.keys()))]
+    #print(data)
     return torch.tensor(data)
     
 

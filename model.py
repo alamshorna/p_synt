@@ -15,13 +15,6 @@ from torch.utils.data import Dataset, DataLoader
 
 from encoder import data_process, token_index_aa, token_index_codon, baseline
 
-# def to_one_hot(x, nin):
-#     print(x, x.size())
-#     one_hot = x.new(x.size(0), nin).float().zero_()
-#     print(x.unsqueeze(1).size())
-#     #one_hot.scatter_(2, x.unsqueeze(2), 1)
-#     return one_hot
-
 class data_set(Dataset):
     """
     data_set class created for dataloading
@@ -36,6 +29,7 @@ class data_set(Dataset):
   
     def __getitem__(self, index):
         return self.data[index]
+        
 
 class PositionalEncoding(nn.Module):
     def __init__(self, fasta_file, d_model, alphabet_string):
@@ -59,30 +53,32 @@ def number_sequences(fasta_file):
     return len(fasta_file)
 
 class TransformerModel (nn.Module):
-    def __init__(self, d_model, fasta_file, alphabet_string, save_location):
+    def __init__(self, d_model, fasta_file, eval_file, alphabet_string):
         super(TransformerModel, self).__init__()
         self.model_type = 'Transformer'
         
         self.fasta_file = fasta_file
-        self.d_model = d_model
+        self.eval_file = eval_file
         self.alphabet = alphabet_string
-        self.pos_encoder = PositionalEncoding(fasta_file, self.d_model, self.alphabet)
-        #figure out inputs
-        encoder_layer = TransformerEncoderLayer(d_model, 1)
-        self.transformer_encoder = TransformerEncoder(encoder_layer, 6)
+
+        #input information
         self.ninp = number_sequences(fasta_file)
         self.ntoken = len(token_index_aa) if alphabet_string == 'aa' else len(token_index_codon)
+        self.tokens = token_index_aa if alphabet_string == 'aa' else token_index_codon
+
+        self.d_model = d_model
+        self.pos_encoder = PositionalEncoding(fasta_file, self.d_model, self.alphabet)
+        encoder_layer = TransformerEncoderLayer(d_model, 8)
+        self.transformer_encoder = TransformerEncoder(encoder_layer, 6)
         self.embedding = nn.Embedding(self.ntoken, 512)
         self.decoder = nn.Linear(self.d_model, self.ntoken)
-        self.init_weights()
-        self.save_location = save_location
-        #self.satya = 'satya'
         self.epochs = 20
         self.log_interval = 1
         self.learning_rate = 0.0001 
         self.loss_function = nn.CrossEntropyLoss()
         self.optimizer = torch.optim.AdamW(self.parameters(), lr=self.learning_rate, weight_decay=0.1)
         self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, 1.0, gamma=0.95)
+        self.init_weights()
 
     def init_weights(self):
         initrange = 0.1
@@ -96,7 +92,7 @@ class TransformerModel (nn.Module):
         output = self.transformer_encoder(src)
         output = self.decoder(output)
         #add softmax
-        #output = torch.nn.functional.softmax(output)
+        output = torch.nn.functional.softmax(output)
         return output
 
 import time
@@ -117,14 +113,14 @@ def prob_dist_avg(list, tokens):
     average = [total/len(list) for total in average]
     return average
 
-def evaluate(model, eval_fasta, alphabet):
+def evaluate(model):
     model.eval()
-    eval_data, eval_true = data_set(eval_fasta, 512, model.alphabet, True), data_set(eval_fasta, 512, model.alphabet, False)
+    eval_data, eval_true = data_set(model.eval_file, 512, model.alphabet, True), data_set(model.eval_file, 512, model.alphabet, False)
     eval_data_loader_list, eval_truth_loader_list = list(DataLoader(eval_data, 512)), list(DataLoader(eval_true, 512))
-    loss_function = nn.CrossEntropyLoss()
-    tokens = token_index_aa if alphabet == 'aa' else token_index_codon
+    #loss_function = model.loss_function
+    tokens = token_index_aa if model.alphabet == 'aa' else token_index_codon
     mask_token = tokens['[MASK]']
-    replacement_distributions, counts = {token:[] for token in range(len(tokens))}, {token:0 for token in range(len(tokens))}
+    replacement_distributions = {token:[] for token in range(len(tokens))}
     losses = []
     with torch.no_grad():
         for i in range(len(eval_data_loader_list)):
@@ -134,61 +130,41 @@ def evaluate(model, eval_fasta, alphabet):
                 current_letter = batch_values[k].item()
                 true_letter = truth_values[k].item()
                 if current_letter == mask_token:
-                    counts[true_letter] += 1
                     dist = nn.functional.softmax(out[k]).tolist()
                     replacement_distributions[true_letter].append(dist)
-                    #print(out[k], torch.tensor(true_letter))
-                loss = loss_function(out[k], torch.tensor(true_letter))
-                losses.append(loss.item())
-            # for y in range(len(out.tolist())):
-            #     loss = loss_function(out[y], truth_values[y])
-            #     losses.append(loss.item())
-            #loss = loss_function(out, truth_values)
-            # loss = loss_function(out, truth_values)
-            # losses.append(loss.item())
-            
-        replacement_distributions = [prob_dist_avg(replacement_distributions[dist_list], tokens) for dist_list in replacement_distributions]
-        replacement_distributions = np.array([np.array(dist) for dist in replacement_distributions])
-        #print(counts)
-        seaborn.heatmap(replacement_distributions)
-        plt.show()
-    
+                    loss = model.loss_function(out[k], torch.tensor(true_letter))
+                    losses.append(loss.item())
+            loss = model.loss_function(out, truth_values)
+            losses.append(loss.item())
+    replacement_distributions = [prob_dist_avg(replacement_distributions[dist_list], tokens) for dist_list in replacement_distributions]
+    replacement_distributions = np.array([np.array(dist) for dist in replacement_distributions])
+    seaborn.heatmap(replacement_distributions)
+    plt.show()
     return np.mean(losses)
 
-def train(model, eval_fasta, alphabet):
+def train(model):
     model.train()
     data, true = data_set(model.fasta_file, 512, model.alphabet, True), data_set(model.fasta_file, 512, model.alphabet, False)
     dataloaderlist, truthloaderlist = list(DataLoader(data, 512)), list(DataLoader(true, 512))
-    tokens = token_index_aa if alphabet == 'aa' else token_index_codon
-    mask_token = tokens['[MASK]']
-    #print(baseline(truthloaderlist, 'aa'))
-    #print('start train')
+    print(baseline(truthloaderlist, 'aa'))
     for epoch in range(model.epochs):
         losses = []
-        #print(len(dataloaderlist))
         for j in range(len(dataloaderlist)):
             batch_values, truth_values = dataloaderlist[j], truthloaderlist[j]
             out = model(batch_values)
             for k in range(len(batch_values)):
-                if batch_values[k] == mask_token:
+                if batch_values[k] == model.tokens['[MASK]']:
                     loss = model.loss_function(out[k], torch.tensor(truth_values[k].item()))
                     losses.append(loss.item())
-                    loss.backward()
-            # loss = model.loss_function(out, truth_values)
-            # losses.append(loss.item())
-            # loss.backward()
-
-            torch.nn.utils.clip_grad_norm_(model.parameters(), 0.01)
-            if j%1 == 0:
-                #print(loss)
-                model.optimizer.step()
-                model.optimizer.zero_grad()
-            model.train()
+        loss.backward()
+        torch.nn.utils.clip_grad_norm_(model.parameters(), 0.01)
+        if j%1 == 0:
+            model.optimizer.step()
+            model.optimizer.zero_grad()
+        model.train()
         if epoch % model.log_interval == 0 or epoch == 0:
-            # print("Epoch: {} -> loss: {}".format(epoch+1, np.mean(losses)))
-            # print("Val Loss:", evaluate(model, eval_fasta, epoch))
             epoch_loss = str(np.mean(losses))
-            val_loss = str(evaluate(model, eval_fasta, alphabet))
+            val_loss = str(evaluate(model))
             print("Epoch", epoch+1, "loss", epoch_loss)
             print("Validation Loss", val_loss)
             # wandb.log({"loss": float(epoch_loss), "val loss": float(val_loss)})
@@ -198,8 +174,9 @@ def train(model, eval_fasta, alphabet):
             out_file.close()
 
 # wandb.login()
-test_model =TransformerModel(512, 'data/micro_aa.fasta', 'aa', 'data/last_run.txt')
-eval_fasta = 'data/micro_test_aa.fasta'
+
+test_model =TransformerModel(512, 'data/micro_aa.fasta', 'data/micro_test_aa.fasta', 'aa')
+
 # run = wandb.init(
 #     # Set the project where this run will be logged
 #     name = "transformer-model-human-aa-07_04_23-alamshorna",
@@ -211,11 +188,12 @@ eval_fasta = 'data/micro_test_aa.fasta'
 #     })
 
 #clear the out file, add the experiment name at the top
-out_file_name = "data/last_run.txt"
-experiment_name = "transformer-model-human-aa-07_04_23-alamshorna"
+#out_file_name = "data/last_run.txt"
+#experiment_name = "transformer-model-human-aa-07_04_23-alamshorna"
 #clears the current contents of the file
-open(out_file_name, 'w').close()
-out_file = open(out_file_name, 'w')
-out_file.write(experiment_name + "\n")
-out_file.close()
-train(test_model, eval_fasta, 'aa')
+# open(out_file_name, 'w').close()
+# out_file = open(out_file_name, 'w')
+# out_file.write(experiment_name + "\n")
+# out_file.close()
+
+train(test_model)
