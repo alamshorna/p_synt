@@ -103,65 +103,54 @@ def to_dict(list):
     return new_dict
 
 #masking function
-def masking(data, masking_proportion, alphabet):
+def masking(model, data, masking_proportion):
     """
     randomly chooses masking_proportion of tokens to cover
     returns data with indices masked
     """
-    #will mask start and end tokens freely among the chosen 15%
-    #print('performing masking')
     data = list(data)
+    #print(data)
     amt_data = len(data)
     num_desired = int(masking_proportion*amt_data)
-    to_be_masked = torch.randint(amt_data-1, (num_desired,))
     chosen_indices = random.sample(list(range(amt_data)), num_desired)
+    #print('chosen_indices', chosen_indices)
     masking_choices = random.choices(['null', 'correct', 'incorrect'], [.8, .1, .1], k=num_desired)
-    alphabet_dictionary = token_index_aa if alphabet == 'aa' else token_index_codon
-    # for i in range(len(chosen_indices)):
-    #     if data[chosen_indices[i]] == 0:
-    #         #print('masked alanine')
-    #         data[chosen_indices[i]] = token_index_aa['[MASK]']
-    
-    for i in range(len(data)):
-        if (data[i] == 0 or data[i] == 18)and random.random()<=0.2:
-            data[i] = token_index_aa['[MASK]']
-        # if masking_choices[i] == 'null':
+    for i in range(len(chosen_indices)):
+        # if data[chosen_indices[i]].item() == 0:
         #     data[chosen_indices[i]] = token_index_aa['[MASK]']
-        # elif masking_choices[i] == 'correct':
-        #     pass
-        # elif masking_choices[i] == 'incorrect':
-        #     #rewrite to not include the correct amino acid
-        #     data[chosen_indices[i]] = alphabet_dictionary[random.choice(list(alphabet_dictionary.keys()))]
-    #print(data)
-    return torch.tensor(data)
-    
+        if data[chosen_indices[i]].item() == model.tokens["[PAD]"]:
+            continue
+        elif masking_choices[i] == 'null':
+            data[chosen_indices[i]] = token_index_aa['[MASK]']
+        elif masking_choices[i] == 'correct':
+            continue
+        elif masking_choices[i] == 'incorrect':
+            #rewrite to not include the correct amino acid
+            data[chosen_indices[i]] = model.tokens[random.choice(list(model.tokens.keys()))]
+    return data
 
-def iterate(length):
-    """
-    given a number
-    returns a list of length length
-    """
-    return  list(range(length))
+# def batching(batch_size, data, alphabet, do_mask):
+#     """
+#     creates a tensor of size batches of tokens 
+#     """
+#     #remove concatenation
+#     #concatenated_data = torch.cat(data)
 
-def batching(batch_size, data, alphabet, do_mask):
-    """
-    creates a tensor of size batches of tokens 
-    """
-    concatenated_data = torch.cat(data)
-    #call to the masking function
-    if do_mask == True:
-        concatenated_data = masking(concatenated_data, 0.5, alphabet)
-    num_full_batches = len(concatenated_data)//batch_size
-    extra = len(concatenated_data)%batch_size
-    amt_padding = batch_size-extra
-    pad_token = token_index_aa["[PAD]"] if alphabet == 'aa' else token_index_codon["[PAD]"]
-    padding_list = [pad_token] * amt_padding
-    padding_tensor = torch.tensor(padding_list, dtype = torch.long)
-    concatenated_data = torch.cat((concatenated_data, padding_tensor))
-    #data = concatenated_data.view(batch_size, num_full_batches+1)
-    return concatenated_data
+#     #call to the masking function
+#     if do_mask == True:
+#         concatenated_data = masking(concatenated_data, 0.5, alphabet)
+#     num_full_batches = len(concatenated_data)//batch_size
+#     extra = len(concatenated_data)%batch_size
+#     amt_padding = batch_size-extra
+#     pad_token = token_index_aa["[PAD]"] if alphabet == 'aa' else token_index_codon["[PAD]"]
+#     padding_list = [pad_token] * amt_padding
+#     padding_tensor = torch.tensor(padding_list, dtype = torch.long)
+#     concatenated_data = torch.cat((concatenated_data, padding_tensor))
+#     #data = concatenated_data.view(batch_size, num_full_batches+1)
+#     return concatenated_data
 
-def data_process(fasta_file, batch_size, alphabet, do_mask):
+
+def data_process(model, fasta, do_mask):
     """
     Performs complete data_preprocessing of amino acid sequences in a fasta_file
     including tokenization, concatenation, chunking, and padding
@@ -170,22 +159,19 @@ def data_process(fasta_file, batch_size, alphabet, do_mask):
     
     note that batch_size is inversely related to chunk_size
     """
-    data_iterator = iter(list(SeqIO.parse(open(fasta_file), 'fasta')))
-    #find maximum length
-    tokenizer_function = encode_aa if alphabet == 'aa' else encode_codon
+    data_iterator = iter(list(SeqIO.parse(open(fasta), 'fasta')))
+    tokenizer = encode_aa if model.alphabet == 'aa' else encode_codon
+    tokens = token_index_aa if model.alphabet == 'aa' else token_index_codon
+    if do_mask == True:
+        tokenized_data = [masking(tokenizer(str(data.seq)), 0.15, model.alphabet) for data in data_iterator]
+    else:
+        tokenized_data = [tokenizer(str(data.seq)) for data in data_iterator]
+    
+    for i in range(len(tokenized_data)):
+        this_len = len(tokenized_data[i])
+        if this_len > model.max_length:
+            tokenized_data[i] = tokenized_data[i][0:model.max_length]
+        elif this_len < model.max_length:
+            tokenized_data[i] = tokenized_data[i] + ([tokens["[PAD]"]] * (model.max_length-this_len))
 
-    #perform tokenization and convert it into a pytorch tensor
-    tokenized_data = [torch.tensor(tokenizer_function(str(data.seq)), dtype = torch.long) for data in data_iterator]
-    #return tokenized_data
-    # off load the batching functionarlity to the pytorch dataloader
-    return batching(batch_size, tokenized_data, alphabet, do_mask)
-
-#print(data_process("/Users/shornaalam/Documents/p_synt/data/10K_codons_test.fasta", 512, 'codon'))
-
-# #for positional_encodings:
-# def indices_encoding(fasta_file, batch_size, alphabet):
-#     data_iterator = iter(list(SeqIO.parse(open(fasta_file), 'fasta')))
-#     tokenizer_function = encode_aa if alphabet == 'aa' else encode_codon
-#     data_iterator = iter(list(SeqIO.parse(open(fasta_file), 'fasta')))
-#     indexed_data = [torch.tensor(iterate(len(tokenizer_function(str(data.seq))))) for data in data_iterator]
-#     return batching(batch_size, indexed_data, alphabet, True)
+    return tokenized_data
