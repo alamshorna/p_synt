@@ -14,7 +14,7 @@ from torch import nn, Tensor
 from torch.nn import TransformerEncoder, TransformerEncoderLayer
 from torch.utils.data import Dataset, DataLoader
 
-from encoder import data_process, token_index_aa, token_index_codon, baseline, masking
+from encoder import data_process, token_index_aa, token_index_codon, baseline, masking, encode_aa, encode_codon
 
 class data_set(Dataset):
     """
@@ -67,6 +67,7 @@ class TransformerModel (nn.Module):
         self.tokens = token_index_aa if alphabet_string == 'aa' else token_index_codon
         self.d_model = d_model
         self.pos_encoder = PositionalEncoding(fasta_file, self.max_length, self.alphabet, self.d_model)
+        self.tokenizer = encode_aa if alphabet_string == 'aa' else encode_codon
         
         # self.lstm = nn.LSTM(self.nimp, 512, 6, batch_first = True)
         encoder_layer = TransformerEncoderLayer(d_model, 8)
@@ -77,7 +78,7 @@ class TransformerModel (nn.Module):
         self.log_interval = 1
         self.learning_rate = 0.00001 
         self.loss_function = nn.CrossEntropyLoss()
-        self.optimizer = torch.optim.AdamW(self.parameters(), lr=self.learning_rate, weight_decay=0.9)
+        self.optimizer = torch.optim.AdamW(self.parameters(), lr=self.learning_rate, weight_decay=0.5)
         self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, 1.0, gamma=0.95)
         self.init_weights()
         print(self.tokens)
@@ -102,27 +103,33 @@ import time
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-def prob_dist_avg(list, tokens):
+#should really rewrite this part so that it doesn't require storing the entire dictionary and instead just sums from inside of the function
+def prob_dist_avg(lst, tokens, count):
     """
     place holder function to be replaced by some fancy numpy nonsense once I have wifi
     simply takes a list of probability distribution and performs and index-wise average
     """
     
-    if len(list) == 0:
-        return [0] * len(tokens)
-    average = [0 for index in range(len(list[0]))]
-    for distribution in list:
+    if len(lst) == 0:
+        return np.array([0] * len(tokens))
+    average = [0 for index in range(len(lst[0]))]
+    for distribution in lst:
         for index in range(len(distribution)):
-            average[index] += distribution[index]
-    average = [total/len(list) for total in average]
-    return average
+            #if count_dict[index] != 0:
+            average[index] += distribution[index]#/count_dict[index]
+            # else:
+            #     average[index] += distribution[index]
+    count = 1 if count == 0 else count
+    average = [total/(len(lst)*count) for total in average]
+    return np.array(average)
 
-def evaluate(model):
+def evaluate(model, epoch, baseline_frequencies):
     model.eval()
     eval_truth = data_set(model, model.eval_file, False).data
     eval_truth = torch.flatten(torch.tensor(eval_truth, dtype = torch.long))
-    evalloader = DataLoader(eval_truth, model.d_model)
-    replacement_distributions = {token:[] for token in range(len(model.tokens))}
+    evalloader = DataLoader(eval_truth, model.max_length)
+    replacement_distributions = {token: np.array([0]*model.ntoken)  for token in range(len(model.tokens))}
+    masking_count = {token:0 for token in range(len(model.tokens))}
     with torch.no_grad():
         total_loss, count = 0, 0
         for sequence in evalloader:
@@ -132,41 +139,72 @@ def evaluate(model):
                 current_letter = masked_sequence[k].item()
                 true_letter = sequence[k].item()
                 if current_letter == model.tokens["[MASK]"]:
+                    masking_count[true_letter] += 1
                     dist = nn.functional.softmax(out[k]).tolist()
-                    replacement_distributions[true_letter].append(dist)
-                    loss = model.loss_function(out[k], torch.tensor(true_letter))
-                    total_loss += loss
-                    count += 1
-    replacement_distributions = [prob_dist_avg(replacement_distributions[dist_list], model.tokens) for dist_list in replacement_distributions]
-    replacement_distributions = np.array([np.array(nn.functional.softmax(torch.Tensor(dist)).tolist()) for dist in replacement_distributions])
-    seaborn.heatmap(replacement_distributions)
-    plt.show()
+                    #replacement_distributions[true_letter].append(dist)
+                    replacement_distributions[true_letter] = np.add(replacement_distributions[true_letter], dist)
+                loss = model.loss_function(out[k], torch.tensor(true_letter))
+                total_loss += loss
+                count += 1
+    masking_count = {index:masking_count[index]+1 if masking_count[index]==0 else masking_count[index] for index in masking_count.keys()}
+    masking_array = np.array([masking_count[key] for key in masking_count.keys()])
+    replacement_distributions = np.array([np.divide(replacement_distributions[key], masking_count[key]) for key in replacement_distributions.keys()])
+    # column_sums = replacement_distributions.sum(axis=0)
+    # replacement_distributions = replacement_distributions/column_sums[None,:]
+    # row_sums = replacement_distributions.sum(axis=1)
+    # replacement_distributions = replacement_distributions/row_sums[:,None]
+    # column_average = replacement_distributions.mean(axis=0)
+    # replacement_distributions = replacement_distributions/column_average[None,:]
+    # column_sums = np.array([])
+    # replacement_distributions = [np.divide(replacement_distributions[i], masking_count[i]) for i in range(len(replacement_distributions))]
+
+    replacement_distributions = [np.divide(row, masking_array) for row in replacement_distributions]
+    replacement_distributions = np.transpose(replacement_distributions)
+    replacement_distributions = np.array([np.array(nn.functional.softmax(torch.Tensor(dist))) for dist in replacement_distributions])
+    replacement_distributions = np.transpose(replacement_distributions)
+    replacement_distributions = np.array([np.array(nn.functional.softmax(torch.Tensor(dist))) for dist in replacement_distributions])
+    print(replacement_distributions)
+    for row in replacement_distributions:
+        print(np.sum(row))
+    # test_file_path = ''
+    np.savetxt('test.csv', replacement_distributions, delimiter=',', fmt='%s')
+    plt.clf()
+    seaborn.heatmap(replacement_distributions[:20, :20])
+    path = 'picture' + str(epoch) + '.png'
+    plt.savefig(path)
     return total_loss/count
+    #replacement_distributions = [prob_dist_avg(replacement_distributions[key], model.tokens, masking_count[key]) for key in replacement_distributions]
+    #replacement_distributions = np.array([np.array(torch.Tensor(dist)).tolist() for dist in replacement_distributions])
+    #replacement_distributions = np.transpose(np.array(replacement_distributions))
+    # for i in range(len(replacement_distributions)):
+    #     replacement_distributions[i] = nn.functional.softmax(torch.Tensor(dist))
+    #replacement_distributions = np.transpose(replacement_distributions)
 
 def train(model):
     model.train()
     truth = data_set(model, model.fasta_file, False).data
     truth = torch.flatten(torch.tensor(truth, dtype = torch.long))
+    print(truth.size())
     truthloader = DataLoader(truth, model.max_length)
+    print(baseline(list(truthloader), model.alphabet))
+    epoch_number = 0
     for epoch in range(model.epochs):
-        
+        epoch_number += 1
         total_loss, count = 0, 0
         for sequence in truthloader:
+            print(count)
             masked_sequence = torch.tensor(masking(model, sequence, 0.15))
             out = model(masked_sequence)
-            # for k in range(len(masked_sequence)):
-            #     if masked_sequence[k].item() == model.tokens['[MASK]']:
+            #print(out.size())
             loss = model.loss_function(out, sequence)
-                    #print(loss)
             total_loss += loss
             count += 1
-                    #losses.append(loss.item())
             loss.backward()
             model.optimizer.step()
             model.optimizer.zero_grad()
         if epoch % model.log_interval == 0 or epoch == 0:
             epoch_loss = str(total_loss/count)
-            val_loss = str(evaluate(model))
+            val_loss = str(evaluate(model, epoch_number, baseline(list(truthloader), model.alphabet)))
             print("Epoch", epoch+1, "loss", epoch_loss)
             print("Validation Loss", val_loss)
             # wandb.log({"loss": float(epoch_loss), "val loss": float(val_loss)})
@@ -177,7 +215,7 @@ def train(model):
 
 # wandb.login()
 
-test_model =TransformerModel(64, 'data/micro_aa.fasta', 'data/micro_test_aa.fasta', 'aa')
+test_model =TransformerModel(64, 'data/micro_aa.fasta', 'data/micro_test_aa.fasta', 'aa', 512)
 
 # run = wandb.init(
 #     # Set the project where this run will be logged
