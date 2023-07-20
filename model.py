@@ -68,6 +68,7 @@ class TransformerModel (nn.Module):
         self.d_model = d_model
         self.pos_encoder = PositionalEncoding(fasta_file, self.max_length, self.alphabet, self.d_model)
         self.tokenizer = encode_aa if alphabet_string == 'aa' else encode_codon
+        self.cut = 20 if alphabet_string == 'aa' else 64
         
         # self.lstm = nn.LSTM(self.nimp, 512, 6, batch_first = True)
         encoder_layer = TransformerEncoderLayer(d_model, 8)
@@ -149,6 +150,19 @@ def evaluate(model, epoch, baseline_frequencies):
     masking_count = {index:masking_count[index]+1 if masking_count[index]==0 else masking_count[index] for index in masking_count.keys()}
     masking_array = np.array([masking_count[key] for key in masking_count.keys()])
     replacement_distributions = np.array([np.divide(replacement_distributions[key], masking_count[key]) for key in replacement_distributions.keys()])
+    replacement_distributions = np.array([np.divide(row, masking_array) for row in replacement_distributions])
+
+    replacement_distributions = replacement_distributions[:model.cut, :model.cut]
+
+    if model.alphabet == 'codon':
+        replacement_distributions = np.delete(replacement_distributions, [10, 11, 14], axis=0)
+        replacement_distributions = np.delete(replacement_distributions, [10, 11, 14], axis=1)
+
+    replacement_distributions = np.transpose(replacement_distributions)
+    replacement_distributions = np.array([np.array(nn.functional.softmax(torch.Tensor(dist))) for dist in replacement_distributions])
+    replacement_distributions = np.transpose(replacement_distributions)
+    replacement_distributions = np.array([np.array(nn.functional.softmax(torch.Tensor(dist))) for dist in replacement_distributions])
+
     # column_sums = replacement_distributions.sum(axis=0)
     # replacement_distributions = replacement_distributions/column_sums[None,:]
     # row_sums = replacement_distributions.sum(axis=1)
@@ -158,18 +172,13 @@ def evaluate(model, epoch, baseline_frequencies):
     # column_sums = np.array([])
     # replacement_distributions = [np.divide(replacement_distributions[i], masking_count[i]) for i in range(len(replacement_distributions))]
 
-    replacement_distributions = [np.divide(row, masking_array) for row in replacement_distributions]
-    replacement_distributions = np.transpose(replacement_distributions)
-    replacement_distributions = np.array([np.array(nn.functional.softmax(torch.Tensor(dist))) for dist in replacement_distributions])
-    replacement_distributions = np.transpose(replacement_distributions)
-    replacement_distributions = np.array([np.array(nn.functional.softmax(torch.Tensor(dist))) for dist in replacement_distributions])
     print(replacement_distributions)
     for row in replacement_distributions:
         print(np.sum(row))
     # test_file_path = ''
     np.savetxt('test.csv', replacement_distributions, delimiter=',', fmt='%s')
     plt.clf()
-    seaborn.heatmap(replacement_distributions[:20, :20])
+    seaborn.heatmap(replacement_distributions)
     path = 'picture' + str(epoch) + '.png'
     plt.savefig(path)
     return total_loss/count
@@ -215,7 +224,7 @@ def train(model):
 
 # wandb.login()
 
-test_model =TransformerModel(64, 'data/micro_aa.fasta', 'data/micro_test_aa.fasta', 'aa', 512)
+test_model =TransformerModel(64, 'data/mini_codon.fasta', 'data/mini_test_codon.fasta', 'codon', 512)
 
 # run = wandb.init(
 #     # Set the project where this run will be logged
