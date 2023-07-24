@@ -3,7 +3,7 @@ import torch
 from Bio import SeqIO
 import random
 
-#chars_aa = 'ARNDCQEGHILKMFPSTWYVX'
+chars_aa = 'ARNDCQEGHILKMFPSTWYVX'
 chars_aa = 'CSTAGPDEQNHRKMILVWYFX'
 token_index_aa = {amino_acid:index for (index, amino_acid) in enumerate(chars_aa)}
 
@@ -107,9 +107,6 @@ def encode_codon(sequence):
     #print([token_index_codon['[START]']] + [token_index_codon[codon_mapping[codon]] for codon in codon_list] + [token_index_codon['[END]']])
     return [token_index_codon['[START]']] + [token_index_codon[codon_mapping[codon]] for codon in codon_list] + [token_index_codon['[END]']]
 
-
-some_sentence = "ATGTCTACAAACTCGATAAAATTACTCGCCAGCGATGTGCATAGAGGACTCGCTGAATTAGTTGCGAGGAGGCTAGGTTTGCACATACTACCATGTGAGTTGAAAAGGGAATCCACGGGGGAAGTTCAATTCTCTATTGGGGAATCAGTTAGAGACGAAGATGTTTTTATTGTTTGTCAGATTGGTTCTGGCGAGGTAAATGACAGGGTGATTGAGCTCATGATCATGATTAACGCTTGTAAAACAGCTAGTGCTAGAAGAATCACCGTTATATTGCCAAACTTTCCTTACGCAAGACAAGACCGAAAAGATAAGTCGCGTGCTCCCATCACTGCGAAGCTAATGGCCGACATGTTGACGACTGCTGGGTGCGACCATGTTATCACCATGGATTTGCACGCTTCTCAGATTCAAGGATTCTTTGATGTCCCAGTGGATAATTTGTATGCCGAGCCTAGTGTTGTTAGGTATATAAAGGAGAAAATAGATTACAAGAACGCAATAATCATTTCGCCGGATGCTGGTGGTGCCAAGAGAGCTGCAGGGCTCGCAGACAGGCTCGACTTGAACTTTGCATTGATTCACAAAGAGCGTGCAAAGGCAAACGAAGTCTCTAGAATGGTGTTGGTGGGTGACGTGAGCGATAAAGTTTGTGTTATTGTTGACGATATGGCAGACACATGTGGTACCTTGGCGAAAGCTGCAGAGGTTTTATTGGAGAACAATGCGAAAGAAGTGATTGCCATTGTAACACATGGTATTTTGTCTGGTAATGCCATGAAGAATATCAATAACTCTAAACTTGAGAGGGTCGTATGTACAAATACGGTTCCTTTTGAGGATAAGTTGAAGTTGTGCAACAAGTTGGATACCATTGATGTTTCAGCTGTTATTGCCGAGGCTATAAGGAGATTGCACAATGGTGAGAGTATCTCTTATTTGTTCAAAAATGCACCTTTATAA"
-
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 def to_dict(list):
@@ -137,7 +134,6 @@ def masking(model, data, masking_proportion):
     #     if not presence[key]:
     #         return data
     #print(data)
-    #print(data)
     data = list(data)
     amt_data = len(data)
     num_desired = int(masking_proportion*amt_data)
@@ -157,7 +153,6 @@ def masking(model, data, masking_proportion):
         elif masking_choices[i] == 'incorrect':
             #rewrite to not include the correct amino acid
             data[chosen_indices[i]] = model.tokens[random.choice(list(model.tokens.keys()))]
-    #print(data)
     return data
     #print(count)
     #print(fully_masked)

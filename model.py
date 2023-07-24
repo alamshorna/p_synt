@@ -14,6 +14,7 @@ from torch import nn, Tensor
 from torch.nn import TransformerEncoder, TransformerEncoderLayer
 from torch.utils.data import Dataset, DataLoader
 
+
 from encoder import data_process, token_index_aa, token_index_codon, baseline, masking, encode_aa, encode_codon
 
 class data_set(Dataset):
@@ -68,6 +69,7 @@ class TransformerModel (nn.Module):
         self.d_model = d_model
         self.pos_encoder = PositionalEncoding(fasta_file, self.max_length, self.alphabet, self.d_model)
         self.tokenizer = encode_aa if alphabet_string == 'aa' else encode_codon
+        self.cut = 20 if self.alphabet == 'aa' else 64
         
         # self.lstm = nn.LSTM(self.nimp, 512, 6, batch_first = True)
         encoder_layer = TransformerEncoderLayer(d_model, 8)
@@ -135,10 +137,13 @@ def evaluate(model, epoch, baseline_frequencies):
         for sequence in evalloader:
             masked_sequence = torch.tensor(masking(model, sequence, 0.15))
             out = model(sequence)
+            #print(out)
             for k in range(len(masked_sequence)):
                 current_letter = masked_sequence[k].item()
                 true_letter = sequence[k].item()
                 if current_letter == model.tokens["[MASK]"]:
+                    #print(current_letter, true_letter)
+                    #print(out[k])
                     masking_count[true_letter] += 1
                     dist = nn.functional.softmax(out[k]).tolist()
                     #replacement_distributions[true_letter].append(dist)
@@ -146,32 +151,44 @@ def evaluate(model, epoch, baseline_frequencies):
                 loss = model.loss_function(out[k], torch.tensor(true_letter))
                 total_loss += loss
                 count += 1
+    print('start', replacement_distributions[10])
+    
     masking_count = {index:masking_count[index]+1 if masking_count[index]==0 else masking_count[index] for index in masking_count.keys()}
     masking_array = np.array([masking_count[key] for key in masking_count.keys()])
     replacement_distributions = np.array([np.divide(replacement_distributions[key], masking_count[key]) for key in replacement_distributions.keys()])
+    replacement_distributions = np.array([np.divide(row, masking_array) for row in replacement_distributions])
+    replacement_distributions = replacement_distributions[:model.cut, :model.cut]
+
+    
+
     # column_sums = replacement_distributions.sum(axis=0)
     # replacement_distributions = replacement_distributions/column_sums[None,:]
     # row_sums = replacement_distributions.sum(axis=1)
     # replacement_distributions = replacement_distributions/row_sums[:,None]
-    # column_average = replacement_distributions.mean(axis=0)
-    # replacement_distributions = replacement_distributions/column_average[None,:]
-    # column_sums = np.array([])
-    # replacement_distributions = [np.divide(replacement_distributions[i], masking_count[i]) for i in range(len(replacement_distributions))]
+    
+    replacement_distributions = np.transpose(replacement_distributions)
+    replacement_distributions = np.array([np.array(nn.functional.softmax(torch.Tensor(dist))) for dist in replacement_distributions])
+    replacement_distributions = np.transpose(replacement_distributions)
+    replacement_distributions = np.array([np.array(nn.functional.softmax(torch.Tensor(dist))) for dist in replacement_distributions])
 
-    replacement_distributions = [np.divide(row, masking_array) for row in replacement_distributions]
-    replacement_distributions = np.transpose(replacement_distributions)
-    replacement_distributions = np.array([np.array(nn.functional.softmax(torch.Tensor(dist))) for dist in replacement_distributions])
-    replacement_distributions = np.transpose(replacement_distributions)
-    replacement_distributions = np.array([np.array(nn.functional.softmax(torch.Tensor(dist))) for dist in replacement_distributions])
-    print(replacement_distributions)
-    for row in replacement_distributions:
-        print(np.sum(row))
-    # test_file_path = ''
-    np.savetxt('test.csv', replacement_distributions, delimiter=',', fmt='%s')
+    for i in range(model.cut):
+        replacement_distributions[i][i] = np.mean(replacement_distributions[i])
+
+
+    #np.savetxt('normalized_rc.csv', replacement_distributions, delimiter=',', fmt='%s')
     plt.clf()
-    seaborn.heatmap(replacement_distributions[:20, :20])
+    seaborn.heatmap(replacement_distributions)
     path = 'picture' + str(epoch) + '.png'
     plt.savefig(path)
+    save_path = 'saved_model' + str(epoch) + '.pt'
+
+    if epoch % 2 == 0:
+        torch.save({
+            'epoch': epoch,
+            'model_state_dict': model.state_dict(),
+            'optimizer_state_dict': model.optimizer.state_dict(),
+            'loss': total_loss/count,
+            }, save_path)
     return total_loss/count
     #replacement_distributions = [prob_dist_avg(replacement_distributions[key], model.tokens, masking_count[key]) for key in replacement_distributions]
     #replacement_distributions = np.array([np.array(torch.Tensor(dist)).tolist() for dist in replacement_distributions])
@@ -195,7 +212,6 @@ def train(model):
             print(count)
             masked_sequence = torch.tensor(masking(model, sequence, 0.15))
             out = model(masked_sequence)
-            #print(out.size())
             loss = model.loss_function(out, sequence)
             total_loss += loss
             count += 1
