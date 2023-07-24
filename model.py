@@ -69,7 +69,6 @@ class TransformerModel (nn.Module):
         self.d_model = d_model
         self.pos_encoder = PositionalEncoding(fasta_file, self.max_length, self.alphabet, self.d_model)
         self.tokenizer = encode_aa if alphabet_string == 'aa' else encode_codon
-        self.cut = 20 if self.alphabet == 'aa' else 64
         
         # self.lstm = nn.LSTM(self.nimp, 512, 6, batch_first = True)
         encoder_layer = TransformerEncoderLayer(d_model, 8)
@@ -156,11 +155,6 @@ def evaluate(model, epoch, baseline_frequencies):
     masking_count = {index:masking_count[index]+1 if masking_count[index]==0 else masking_count[index] for index in masking_count.keys()}
     masking_array = np.array([masking_count[key] for key in masking_count.keys()])
     replacement_distributions = np.array([np.divide(replacement_distributions[key], masking_count[key]) for key in replacement_distributions.keys()])
-    replacement_distributions = np.array([np.divide(row, masking_array) for row in replacement_distributions])
-    replacement_distributions = replacement_distributions[:model.cut, :model.cut]
-
-    
-
     # column_sums = replacement_distributions.sum(axis=0)
     # replacement_distributions = replacement_distributions/column_sums[None,:]
     # row_sums = replacement_distributions.sum(axis=1)
@@ -174,10 +168,9 @@ def evaluate(model, epoch, baseline_frequencies):
     for i in range(model.cut):
         replacement_distributions[i][i] = np.mean(replacement_distributions[i])
 
-
     #np.savetxt('normalized_rc.csv', replacement_distributions, delimiter=',', fmt='%s')
     plt.clf()
-    seaborn.heatmap(replacement_distributions)
+    seaborn.heatmap(replacement_distributions[:20, :20])
     path = 'picture' + str(epoch) + '.png'
     plt.savefig(path)
     save_path = 'saved_model' + str(epoch) + '.pt'
@@ -231,7 +224,7 @@ def train(model):
 
 # wandb.login()
 
-test_model =TransformerModel(64, 'data/micro_aa.fasta', 'data/micro_test_aa.fasta', 'aa', 512)
+test_model =TransformerModel(64, 'data/mini_codon.fasta', 'data/mini_test_codon.fasta', 'codon', 512)
 
 # run = wandb.init(
 #     # Set the project where this run will be logged
