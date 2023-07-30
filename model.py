@@ -78,18 +78,18 @@ amino = {"TTT":"F", "TTC":"F", "TTA":"L", "TTG":"L",
     "GGT":"G", "GGC":"G", "GGA":"G", "GGG":"G"}
 
 
-def baseline(truthloaderlist, alphabet):
-    #print(truthloaderlist)
-    chars = chars_aa if alphabet == 'aa' else chars_codon
-    frequencies = {i:0 for i in range(len(chars)+3)}
-    current_batch_freq = {}
-    for batch in truthloaderlist:
-        batch = batch.tolist()
-        #print(batch)
-        current_batch_freq = {token:batch.count(token) for token in batch}
-        for token in current_batch_freq:
-            frequencies[token] += batch.count(token)
-    return frequencies
+# def baseline(truthloaderlist, alphabet):
+#     #print(truthloaderlist)
+#     chars = chars_aa if alphabet == 'aa' else chars_codon
+#     frequencies = {i:0 for i in range(len(chars)+3)}
+#     current_batch_freq = {}
+#     for batch in truthloaderlist:
+#         batch = batch.tolist()
+#         #print(batch)
+#         current_batch_freq = {token:batch.count(token) for token in batch}
+#         for token in current_batch_freq:
+#             frequencies[token] += batch.count(token)
+#     return frequencies
 
 def translation_window(sequence):
     """
@@ -166,9 +166,6 @@ def masking(model, data, masking_proportion):
         elif masking_choices[i] == 'incorrect':
             #rewrite to not include the correct amino acid
             data[chosen_indices[i]] = model.tokens[random.choice(list(model.tokens.keys()))]
-    return data
-    #print(count)
-    #print(fully_masked)
     return data
 
 
@@ -338,7 +335,7 @@ class DummyModel (nn.Module):
         self.linear = nn.Linear(self.d_model, self.ntoken)
         self.epochs = 30
         self.log_interval = 1
-        self.learning_rate = 0.0001 
+        self.learning_rate = 0.00001 
         self.loss_function = nn.CrossEntropyLoss()
         print(self.parameters())
         self.optimizer = torch.optim.AdamW(self.parameters(), lr=self.learning_rate, weight_decay=0.01)
@@ -392,30 +389,29 @@ def prob_dist_avg(lst, tokens, count):
 def evaluate(model, epoch):
     model.eval()
     eval_truth = data_set(model, model.eval_file, False).data
-    eval_truth = torch.flatten(torch.tensor(eval_truth, dtype = torch.long))
-    evalloader = DataLoader(eval_truth, model.max_length)
+    eval_truth = torch.from_numpy(np.array(eval_truth))
+    evalloader = DataLoader(eval_truth)
+
     replacement_distributions = {token: np.array([0]*model.ntoken)  for token in range(len(model.tokens))}
     masking_count = {token:0 for token in range(len(model.tokens))}
+
     with torch.no_grad():
         total_loss, count = 0, 0
-        for sequence in evalloader:
-            masked_sequence = torch.tensor(masking(model, sequence, 0.15))
-            out = model(masked_sequence)
-            #print(out)
-            for k in range(len(masked_sequence)):
-                current_letter = masked_sequence[k].item()
-                true_letter = sequence[k].item()
-                if current_letter == model.tokens["[MASK]"]:
-                    #print(current_letter, true_letter)
-                    #print(out[k])
-                    masking_count[true_letter] += 1
-                    dist = nn.functional.softmax(out[k]).tolist()
-                    #replacement_distributions[true_letter].append(dist)
-                    replacement_distributions[true_letter] = np.add(replacement_distributions[true_letter], dist)
-                    loss = model.loss_function(out[k], torch.tensor(true_letter))
-                    total_loss += loss
-                count += 1
-    print('start', replacement_distributions[10])
+        for batch in evalloader:
+            for sequence in batch:
+                masked_sequence = torch.tensor(masking(model, sequence, 0.15))
+                out = model(masked_sequence)
+                for k in range(len(masked_sequence)):
+                    current_letter = masked_sequence[k].item()
+                    true_letter = sequence[k].item()
+                    if current_letter == model.tokens["[MASK]"]:
+                        masking_count[true_letter] += 1
+                        dist = nn.functional.softmax(out[k]).tolist()
+                        replacement_distributions[true_letter] = np.add(replacement_distributions[true_letter], dist)
+                        loss = model.loss_function(out[k], torch.tensor(true_letter))
+                        total_loss += loss
+                    count += 1
+                del(masked_sequence)
     
     masking_count = {index:masking_count[index]+1 if masking_count[index]==0 else masking_count[index] for index in masking_count.keys()}
     masking_array = np.array([masking_count[key] for key in masking_count.keys()])
@@ -465,7 +461,7 @@ def evaluate(model, epoch):
             'optimizer_state_dict': model.optimizer.state_dict(),
             'loss': total_loss/count,
             }, save_path)
-    return total_loss/count
+    return total_loss
     #replacement_distributions = [prob_dist_avg(replacement_distributions[key], model.tokens, masking_count[key]) for key in replacement_distributions]
     #replacement_distributions = np.array([np.array(torch.Tensor(dist)).tolist() for dist in replacement_distributions])
     #replacement_distributions = np.transpose(np.array(replacement_distributions))
@@ -477,14 +473,16 @@ def train(model):
     model.train()
     truth = data_set(model, model.fasta_file, False).data
     truth = torch.from_numpy(np.array(truth))
-    truthloader = DataLoader(truth)
+    batch_size = 1
+    truthloader = DataLoader(truth, batch_size)
     epoch_number = 0
+    count = 0
     for epoch in range(model.epochs):
         epoch_number += 1
-        overall_loss = 0
+        epoch_loss = 0
         for sequence_batch in truthloader:
             for sequence in sequence_batch:
-                total_loss, count = 0, 0
+                sequence_loss = 0
                 masked_sequence = torch.tensor(masking(model, sequence, 0.15))
                 out = model(masked_sequence)
                 for k in range(len(masked_sequence)):
@@ -492,16 +490,19 @@ def train(model):
                     if current_letter == model.tokens["[MASK]"]:
                         # print(out[k])
                         loss = model.loss_function(out[k], true_letter)
-                        total_loss += loss
-                total_loss.backward()
+                    sequence_loss += loss
+                sequence_loss.backward()
                 count += 1
+                print(count)
                 model.optimizer.step()
                 model.scheduler.step()
                 model.optimizer.zero_grad()
-            overall_loss += total_loss
-        print(overall_loss/len(truth))
+                del(masked_sequence)
+            #print(sequence_loss)
+            epoch_loss += sequence_loss
+        print(epoch_loss)
         if epoch % model.log_interval == 0 or epoch == 0:
-            epoch_loss = str(overall_loss/(epoch_number*count))
+            epoch_loss = str(epoch_loss)
             print("Epoch", epoch+1, "loss", epoch_loss)
             val_loss = str(evaluate(model, epoch_number))
             #print("Validation Loss", val_loss)
@@ -510,7 +511,7 @@ def train(model):
 
 # wandb.login()
 
-test_model = TransformerModel(64, 'data/micro_aa.fasta', 'data/micro_test_aa.fasta', 'aa', 512)
+test_model = TransformerModel(64, 'data/mini_aa.fasta', 'data/mini_test_aa.fasta', 'aa', 512)
 
 # run = wandb.init(
 #     # Set the project where this run will be logged
