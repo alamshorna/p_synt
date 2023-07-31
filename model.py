@@ -77,20 +77,6 @@ amino = {"TTT":"F", "TTC":"F", "TTA":"L", "TTG":"L",
     "GAT":"D", "GAC":"D", "GAA":"E", "GAG":"E",
     "GGT":"G", "GGC":"G", "GGA":"G", "GGG":"G"}
 
-
-# def baseline(truthloaderlist, alphabet):
-#     #print(truthloaderlist)
-#     chars = chars_aa if alphabet == 'aa' else chars_codon
-#     frequencies = {i:0 for i in range(len(chars)+3)}
-#     current_batch_freq = {}
-#     for batch in truthloaderlist:
-#         batch = batch.tolist()
-#         #print(batch)
-#         current_batch_freq = {token:batch.count(token) for token in batch}
-#         for token in current_batch_freq:
-#             frequencies[token] += batch.count(token)
-#     return frequencies
-
 def translation_window(sequence):
     """
     separate a raw DNA sequence into a codons
@@ -117,19 +103,9 @@ def encode_codon(sequence):
     output: encoding (list)
     """
     codon_list = translation_window(sequence)
-    #print([token_index_codon['[START]']] + [token_index_codon[codon_mapping[codon]] for codon in codon_list] + [token_index_codon['[END]']])
     return [token_index_codon['[START]']] + [token_index_codon[codon_mapping[codon]] for codon in codon_list] + [token_index_codon['[END]']]
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
-def to_dict(list):
-    new_dict = {}
-    for char in list:
-        if char in new_dict.keys():
-            new_dict[char] += 1
-        else:
-            new_dict[char] = 0
-    return new_dict
 
 #masking function
 def masking(model, data, masking_proportion):
@@ -169,7 +145,7 @@ def masking(model, data, masking_proportion):
     return data
 
 
-def data_process(model, fasta, do_mask):
+def data_process(model, fasta):
     """
     Performs complete data_preprocessing of amino acid sequences in a fasta_file
     including tokenization, concatenation, chunking, and padding
@@ -180,10 +156,7 @@ def data_process(model, fasta, do_mask):
     """
     data_iterator = iter(list(SeqIO.parse(open(fasta), 'fasta')))
     tokenizer = encode_aa if model.alphabet == 'aa' else encode_codon
-    if do_mask == True:
-        tokenized_data = [masking(tokenizer(str(data.seq)), 0.15, model.alphabet) for data in data_iterator]
-    else:
-        tokenized_data = [tokenizer(str(data.seq)) for data in data_iterator]
+    tokenized_data = [tokenizer(str(data.seq)) for data in data_iterator]
     
     for i in range(len(tokenized_data)):
         this_len = len(tokenized_data[i])
@@ -195,13 +168,13 @@ def data_process(model, fasta, do_mask):
     return tokenized_data
 
 
-class data_set(Dataset):
+class Data_Set(Dataset):
     """
     data_set class created for dataloading
     simply calls the data_process function from encoder.py to initialize
     """
-    def __init__(self, model, fasta, do_mask):
-        self.data = data_process(model, fasta, do_mask)
+    def __init__(self, model, fasta):
+        self.data = data_process(model, fasta)
 
     def __len__(self):
         return len(self.data)
@@ -264,13 +237,15 @@ class TransformerModel (nn.Module):
 
         self.linear = nn.Linear(self.d_model, self.ntoken)
         self.epochs = 30
+        self.batch_size = 1
         self.log_interval = 1
-        self.learning_rate = 0.00001 
+        self.learning_rate = 0.000001 
         self.loss_function = nn.CrossEntropyLoss()
         self.optimizer = torch.optim.AdamW(self.parameters(), lr=self.learning_rate, weight_decay=0.01)
         self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, 1.0, gamma=0.95)
         self.init_weights()
         print(self.tokens)
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     def init_weights(self):
         initrange = 0.1
@@ -298,7 +273,7 @@ class TransformerModel (nn.Module):
         output[:, 27:] = -1e7 #make a hyperparameter
         output = torch.nn.functional.softmax(output)
         return output
-    
+import time
 
 class DummyModel (nn.Module):
     def __init__(self, d_model, fasta_file, eval_file, alphabet_string, max_length = 512):
@@ -310,7 +285,6 @@ class DummyModel (nn.Module):
         self.alphabet = alphabet_string
 
         #input information
-        self.ninp = number_sequences(fasta_file)
         self.ntoken = len(token_index_aa) if alphabet_string == 'aa' else len(token_index_codon)
         self.max_length = max_length
         self.tokens = token_index_aa if alphabet_string == 'aa' else token_index_codon
@@ -330,18 +304,17 @@ class DummyModel (nn.Module):
         #dimensionality reduction
         #describe how similar the embeddings are
         #if that clusters we're doing well
-
+        self.batch_size = 32
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
         self.linear = nn.Linear(self.d_model, self.ntoken)
         self.epochs = 30
         self.log_interval = 1
-        self.learning_rate = 0.00001 
+        self.learning_rate = 0.001 
         self.loss_function = nn.CrossEntropyLoss()
-        print(self.parameters())
         self.optimizer = torch.optim.AdamW(self.parameters(), lr=self.learning_rate, weight_decay=0.01)
         self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, 1.0, gamma=0.95)
         self.init_weights()
-        print(self.tokens)
 
     def init_weights(self):
         initrange = 0.1
@@ -354,7 +327,7 @@ class DummyModel (nn.Module):
         src = self.embedding(src) * math.sqrt(self.d_model)
         # src = self.pos_encoder(src)
         output = self.linear(src)
-        output = self.ReLu(src)
+        output = nn.ReLU()(output)
         output = self.linear(src)
         #set to zero for [PAD], [MASK]
         output[:, 27:] = -1e7 #make a hyperparameter
@@ -362,33 +335,9 @@ class DummyModel (nn.Module):
         return output
 
 
-import time
-
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
-#should really rewrite this part so that it doesn't require storing the entire dictionary and instead just sums from inside of the function
-def prob_dist_avg(lst, tokens, count):
-    """
-    place holder function to be replaced by some fancy numpy nonsense once I have wifi
-    simply takes a list of probability distribution and performs and index-wise average
-    """
-    
-    if len(lst) == 0:
-        return np.array([0] * len(tokens))
-    average = [0 for index in range(len(lst[0]))]
-    for distribution in lst:
-        for index in range(len(distribution)):
-            #if count_dict[index] != 0:
-            average[index] += distribution[index]#/count_dict[index]
-            # else:
-            #     average[index] += distribution[index]
-    count = 1 if count == 0 else count
-    average = [total/(len(lst)*count) for total in average]
-    return np.array(average)
-
 def evaluate(model, epoch):
     model.eval()
-    eval_truth = data_set(model, model.eval_file, False).data
+    eval_truth = Data_Set(model, model.eval_file).data
     eval_truth = torch.from_numpy(np.array(eval_truth))
     evalloader = DataLoader(eval_truth)
 
@@ -398,41 +347,33 @@ def evaluate(model, epoch):
     with torch.no_grad():
         total_loss, count = 0, 0
         for batch in evalloader:
+            batch = batch.to(model.device)
             for sequence in batch:
                 masked_sequence = torch.tensor(masking(model, sequence, 0.15))
-                out = model(masked_sequence)
+                out = model(sequence)
                 for k in range(len(masked_sequence)):
-                    current_letter = masked_sequence[k].item()
-                    true_letter = sequence[k].item()
+                    current_letter, true_letter = masked_sequence[k].item(), sequence[k].item()
                     if current_letter == model.tokens["[MASK]"]:
                         masking_count[true_letter] += 1
-                        dist = nn.functional.softmax(out[k]).tolist()
-                        replacement_distributions[true_letter] = np.add(replacement_distributions[true_letter], dist)
                         loss = model.loss_function(out[k], torch.tensor(true_letter))
                         total_loss += loss
-                    count += 1
-                del(masked_sequence)
+                        dist = nn.functional.softmax(out[k]).tolist()
+                        replacement_distributions[true_letter] = np.add(replacement_distributions[true_letter], dist)
+                count += 1
+    del evalloader
     
     masking_count = {index:masking_count[index]+1 if masking_count[index]==0 else masking_count[index] for index in masking_count.keys()}
-    masking_array = np.array([masking_count[key] for key in masking_count.keys()])
-    replacement_distributions = np.array([np.divide(replacement_distributions[key], masking_count[key]) for key in replacement_distributions.keys()])
+
+    # masking_array = np.array([masking_count[key] for key in masking_count.keys()])
     # replacement_distributions = np.array([np.divide(row, masking_array) for row in replacement_distributions])
+
+    replacement_distributions = np.array([np.divide(replacement_distributions[key], masking_count[key]) for key in replacement_distributions.keys()])
     replacement_distributions = replacement_distributions[:model.cut, :model.cut]
-    # column_sums = replacement_distributions.sum(axis=0)
-    # replacement_distributions = replacement_distributions/column_sums[None,:]
-    # row_sums = replacement_distributions.sum(axis=1)
-    # replacement_distributions = replacement_distributions/row_sums[:,None]
     
-    replacement_distributions = np.transpose(replacement_distributions)
-    replacement_distributions = np.array([np.array(nn.functional.softmax(torch.Tensor(dist))) for dist in replacement_distributions])
-    replacement_distributions = np.transpose(replacement_distributions)
-    replacement_distributions = np.array([np.array(nn.functional.softmax(torch.Tensor(dist))) for dist in replacement_distributions])
-
-    # replacement_distributions = (replacement_distributions + np.transpose(replacement_distributions))/2
-
-    
-
-    #scaler = skp.MinMaxScaler(feature_range=-[10, 10])
+    # replacement_distributions = np.transpose(replacement_distributions)
+    # replacement_distributions = np.array([np.array(nn.functional.softmax(torch.Tensor(dist))) for dist in replacement_distributions])
+    # replacement_distributions = np.transpose(replacement_distributions)
+    # replacement_distributions = np.array([np.array(nn.functional.softmax(torch.Tensor(dist))) for dist in replacement_distributions])
 
     # minimum, maximum = np.min(replacement_distributions), np.max(replacement_distributions)
     # center = (minimum + maximum)/2
@@ -443,11 +384,6 @@ def evaluate(model, epoch):
     # for i in range(model.cut):
     #     replacement_distributions[i][i] = np.mean(replacement_distributions[i])
 
-    # scaler = skp.StandardScaler()
-    # replacement_distributions = scaler.fit_transform(replacement_distributions)
-    print(replacement_distributions)
-
-    #np.savetxt('normalized_rc.csv', replacement_distributions, delimiter=',', fmt='%s')
     plt.clf()
     seaborn.heatmap(replacement_distributions[:20, :20])
     path = 'picture' + str(epoch) + '.png'
@@ -471,47 +407,47 @@ def evaluate(model, epoch):
 
 def train(model):
     model.train()
-    truth = data_set(model, model.fasta_file, False).data
+    truth = Data_Set(model, model.fasta_file).data
     truth = torch.from_numpy(np.array(truth))
-    batch_size = 1
-    truthloader = DataLoader(truth, batch_size)
+    truthloader = DataLoader(truth, model.batch_size)
     epoch_number = 0
-    count = 0
     for epoch in range(model.epochs):
         epoch_number += 1
         epoch_loss = 0
+        sequence_losses = []
+        sequence_count = 0
         for sequence_batch in truthloader:
+            sequence_batch = sequence_batch.to(model.device)
             for sequence in sequence_batch:
+                sequence_count += 1
                 sequence_loss = 0
                 masked_sequence = torch.tensor(masking(model, sequence, 0.15))
                 out = model(masked_sequence)
+                model.optimizer.zero_grad()
+                print(sequence_count)
                 for k in range(len(masked_sequence)):
                     current_letter, true_letter = masked_sequence[k], sequence[k]
                     if current_letter == model.tokens["[MASK]"]:
-                        # print(out[k])
-                        loss = model.loss_function(out[k], true_letter)
-                    sequence_loss += loss
+                        sequence_loss += model.loss_function(out[k], true_letter)
+                        sequence_losses.append(sequence_loss.item())
+                epoch_loss += sequence_loss
                 sequence_loss.backward()
-                count += 1
-                print(count)
                 model.optimizer.step()
                 model.scheduler.step()
-                model.optimizer.zero_grad()
-                del(masked_sequence)
-            #print(sequence_loss)
-            epoch_loss += sequence_loss
-        print(epoch_loss)
+                
         if epoch % model.log_interval == 0 or epoch == 0:
-            epoch_loss = str(epoch_loss)
+            epoch_loss = str(np.mean(sequence_losses))
             print("Epoch", epoch+1, "loss", epoch_loss)
             val_loss = str(evaluate(model, epoch_number))
-            #print("Validation Loss", val_loss)
+            print("Validation Loss", val_loss)
             #wandb.log({"loss": float(epoch_loss), "val loss": float(val_loss)})
             #loss_string = "Epoch " + str(epoch+1) + ": loss " + epoch_loss + " val loss " + val_loss + "\n"
 
 # wandb.login()
 
-test_model = TransformerModel(64, 'data/mini_aa.fasta', 'data/mini_test_aa.fasta', 'aa', 512)
+
+
+test_model = TransformerModel(64, 'data/micro_aa.fasta', 'data/micro_test_aa.fasta', 'aa', 512)
 
 # run = wandb.init(
 #     # Set the project where this run will be logged
@@ -522,14 +458,5 @@ test_model = TransformerModel(64, 'data/mini_aa.fasta', 'data/mini_test_aa.fasta
 #         "learning_rate": test_model.learning_rate,
 #         "epochs": test_model.epochs,
 #     })
-
-#clear the out file, add the experiment name at the top
-#out_file_name = "data/last_run.txt"
-#experiment_name = "transformer-model-human-aa-07_04_23-alamshorna"
-#clears the current contents of the file
-# open(out_file_name, 'w').close()
-# out_file = open(out_file_name, 'w')
-# out_file.write(experiment_name + "\n")
-# out_file.close()
 
 train(test_model)
