@@ -255,7 +255,6 @@ class TransformerModel (nn.Module):
         self.linear.weight.data.uniform_(-initrange, initrange)
 
     def forward(self, src):
-        masked = src
         src = src.to(self.device)
         # print("src device: ", src.device)
         embedding = self.embedding(src)
@@ -275,9 +274,11 @@ class TransformerModel (nn.Module):
 
         output = self.linear(encoded)
         #set to zero for [PAD], [MASK]
-        output[:, 27:] = -1e7 #make a hyperparameter
+        output[:, 27:] = -inf #make a hyperparameter
         output = torch.nn.functional.softmax(output)
         return output
+
+
 import time
 
 class DummyModel (nn.Module):
@@ -354,7 +355,9 @@ def evaluate(model, epoch):
         for batch in evalloader:
             batch = batch.to(model.device)
             for sequence in batch:
+                sequence = sequence.to(model.device)
                 masked_sequence = torch.tensor(masking(model, sequence, 0.15))
+                masked_sequence = masked_sequence.to(model.device)
                 out = model(sequence)
                 for k in range(len(masked_sequence)):
                     current_letter, true_letter = masked_sequence[k].item(), sequence[k].item()
@@ -403,7 +406,7 @@ def evaluate(model, epoch):
             'loss': total_loss/count,
             }, save_path)
     return total_loss
-    #replacement_distributions = [prob_dist_avg(replacement_distributions[key], model.tokens, masking_count[key]) for key in replacement_distributions]
+    #replacement_https://cornell.zoom.us/j/99984949385?pwd=MWNRNVRTSnZiYWMxMnA2RzhhaXhqQT09distributions = [prob_dist_avg(replacement_distributions[key], model.tokens, masking_count[key]) for key in replacement_distributions]
     #replacement_distributions = np.array([np.array(torch.Tensor(dist)).tolist() for dist in replacement_distributions])
     #replacement_distributions = np.transpose(np.array(replacement_distributions))
     # for i in range(len(replacement_distributions)):
@@ -413,13 +416,12 @@ def evaluate(model, epoch):
 def train(model):
     train_file = open("train_loss_run2.txt", "a")
     eval_file = open("eval_loss_run2.txt", "a")
+    masked_seqs_files = open("masked_seqs_run2.txt", "a")
     model.train()
     truth = Data_Set(model, model.fasta_file).data
     truth = torch.from_numpy(np.array(truth))
     truthloader = DataLoader(truth, model.batch_size)
-    epoch_number = 0
     for epoch in range(model.epochs):
-        epoch_number += 1
         epoch_loss = 0
         sequence_losses = []
         sequence_count = 0
@@ -431,30 +433,33 @@ def train(model):
                 sequence_loss = 0
                 masked_sequence = torch.tensor(masking(model, sequence, 0.15))
                 masked_sequence = masked_sequence.to(model.device)
+                masked_seqs_files.write(str(np.array(masked_sequence)))
                 # print(type(masked_sequence))
                 # print(type(sequence))
                 # print(masked_sequence.device)
                 # print(sequence.device)
                 out = model(masked_sequence)
-                model.optimizer.zero_grad()
-                # print(sequence_count)
+                print(sequence_count)
                 for k in range(len(masked_sequence)):
                     current_letter, true_letter = masked_sequence[k], sequence[k]
                     # print(type(current_letter))
                     # print(type(true_letter))
                     if current_letter == model.tokens["[MASK]"]:
                         sequence_loss += model.loss_function(out[k], true_letter)
+                        train_file.write("sequence_count: " + str(sequence_count) + "    loss: " + str(sequence_loss))
                         sequence_losses.append(sequence_loss.item())
                 epoch_loss += sequence_loss
                 sequence_loss.backward()
                 model.optimizer.step()
                 model.scheduler.step()
+
+                model.optimizer.zero_grad()
                 
         if epoch % model.log_interval == 0 or epoch == 0:
             epoch_loss = str(np.mean(sequence_losses))
-            # print("Epoch", epoch+1, "loss", epoch_loss)
-            val_loss = str(evaluate(model, epoch_number))
-            # print("Validation Loss", val_loss)
+            print("Epoch", epoch+1, "loss", epoch_loss)
+            val_loss = str(evaluate(model, epoch+1))
+            print("Validation Loss", val_loss)
 
             train_file.write('\n')
             train_file.write("epoch " + str(epoch + 1) + ": ")
