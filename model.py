@@ -360,10 +360,10 @@ def evaluate(model, epoch):
                 masked_sequence = masked_sequence.to(model.device)
                 out = model(sequence)
                 for k in range(len(masked_sequence)):
-                    current_letter, true_letter = masked_sequence[k].item(), sequence[k].item()
+                    current_letter, true_letter = masked_sequence[k], sequence[k]
                     if current_letter == model.tokens["[MASK]"]:
                         masking_count[true_letter] += 1
-                        loss = model.loss_function(out[k], torch.tensor(true_letter))
+                        loss = model.loss_function(out[k], true_letter)
                         total_loss += loss
                         dist = nn.functional.softmax(out[k]).tolist()
                         replacement_distributions[true_letter] = np.add(replacement_distributions[true_letter], dist)
