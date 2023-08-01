@@ -274,7 +274,7 @@ class TransformerModel (nn.Module):
 
         output = self.linear(encoded)
         #set to zero for [PAD], [MASK]
-        output[:, 27:] = -inf #make a hyperparameter
+        output[:, 27:] = -np.inf #make a hyperparameter
         output = torch.nn.functional.softmax(output)
         return output
 
@@ -433,7 +433,8 @@ def train(model):
                 sequence_loss = 0
                 masked_sequence = torch.tensor(masking(model, sequence, 0.15))
                 masked_sequence = masked_sequence.to(model.device)
-                masked_seqs_files.write(str(np.array(masked_sequence)))
+                masked_seqs_files.write(str(np.array(masked_sequence.cpu())))
+                masked_sequence = masked_sequence.cuda()
                 # print(type(masked_sequence))
                 # print(type(sequence))
                 # print(masked_sequence.device)
