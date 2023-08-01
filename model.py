@@ -115,12 +115,13 @@ mask_token_index = token_index_aa['[MASK]']
 masking_proportion = 0.15 
 
 #masking function
-def masking(tokenized_sequence, masking_proportion):
-    masked_sequence = tokenized_sequence.clone()
-    num_tokens_to_mask = int(masking_proportion * len(tokenized_sequence))
-    masked_indices = torch.randperm(len(tokenized_sequence))[:num_tokens_to_mask]
-    masked_sequence[masked_indices] = mask_token_index  # Replace with [MASK] token
-    return masked_sequence
+def masking(tokenized_tensor, masking_proportion):
+    masked_tensor = tokenized_tensor.clone()
+    num_tokens_to_mask = int(masking_proportion * len(tokenized_tensor[0]))
+    for masked_sequence in masked_tensor:
+        masked_indices = torch.randperm(len(tokenized_tensor[0]))[:num_tokens_to_mask]
+        masked_sequence[masked_indices] = mask_token_index  # Replace with [MASK] token
+    return masked_tensor
 
 def data_process(model, fasta):
     """
@@ -211,7 +212,7 @@ class TransformerModel (nn.Module):
 
         self.linear = nn.Linear(self.d_model, self.ntoken, device=self.device)
         self.epochs = 100
-        self.batch_size = 1
+        self.batch_size = 32
         self.log_interval = 1
         self.learning_rate = 0.0001 
         self.loss_function = nn.CrossEntropyLoss()
@@ -289,20 +290,22 @@ def evaluate(model, epoch):
     #replacement_distributions = np.transpose(replacement_distributions)
 
 def train(model):
-    train_file = open("train_loss_run2.txt", "a")
-    eval_file = open("eval_loss_run2.txt", "a")
-    masked_seqs_files = open("masked_seqs_run2.txt", "a")
+    train_file = open("train_loss.txt", "a")
+    eval_file = open("eval_loss.txt", "a")
+    masked_seqs_files = open("masked_seqs.txt", "a")
     model.train()
     truth = Data_Set(model, model.fasta_file).data
     truth = torch.from_numpy(np.array(truth))
     truthloader = DataLoader(truth, model.batch_size)
     for epoch in range(model.epochs):
         epoch_loss = 0
+        print(len(truthloader))
         for sequence_batch in truthloader:
             sequence_batch = sequence_batch.to(model.device)
             batch_loss = 0
             #masked_batch
-            out = model(sequence_batch)
+            masked_batch = masking(sequence_batch, 0.15)
+            out = model(masked_batch)
             #print(out)
             batch_loss = model.loss_function(torch.transpose(out, 1, 2), sequence_batch)
             batch_loss.backward()
@@ -312,7 +315,11 @@ def train(model):
             epoch_loss += batch_loss
 
         if epoch % model.log_interval == 0 or epoch == 0:
-            print("Epoch", epoch+1, "loss", str(epoch_loss))
+            loss_string = "Epoch" + str(epoch+1) +  "loss" + str(epoch_loss)
+            print(loss_string)
+            text_file = open("train_loss.txt", "w")
+            text_file.write(loss_string)
+            text_file.close()
             #val_loss = str(evaluate(model, epoch + 1))
             #print("Validation Loss", val_loss)
             #wandb.log({"loss": float(epoch_loss), "val loss": float(val_loss)})
