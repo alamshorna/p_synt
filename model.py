@@ -362,11 +362,11 @@ def evaluate(model, epoch):
                 for k in range(len(masked_sequence)):
                     current_letter, true_letter = masked_sequence[k], sequence[k]
                     if current_letter == model.tokens["[MASK]"]:
-                        masking_count[true_letter] += 1
+                        masking_count[true_letter.item()] += 1
                         loss = model.loss_function(out[k], true_letter)
                         total_loss += loss
                         dist = nn.functional.softmax(out[k]).tolist()
-                        replacement_distributions[true_letter] = np.add(replacement_distributions[true_letter], dist)
+                        replacement_distributions[true_letter.item()] = np.add(replacement_distributions[true_letter.item()], dist)
                 count += 1
     del evalloader
     
@@ -443,8 +443,8 @@ def train(model):
                 print(sequence_count)
                 for k in range(len(masked_sequence)):
                     current_letter, true_letter = masked_sequence[k], sequence[k]
-                    # print(type(current_letter))
-                    # print(type(true_letter))
+                    # print(current_letter.device) - cuda
+                    # print(true_letter.device) - cuda
                     if current_letter == model.tokens["[MASK]"]:
                         sequence_loss += model.loss_function(out[k], true_letter)
                         train_file.write("sequence_count: " + str(sequence_count) + "    loss: " + str(sequence_loss))
