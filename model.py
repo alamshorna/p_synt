@@ -164,6 +164,7 @@ class PositionalEncoding(nn.Module):
         position = torch.arange(max_length).unsqueeze(1) #(max_length, 1)
         div_term = torch.exp(torch.arange(0, d_model, 2) * (-math.log(10000.0) / d_model))
         pe = torch.zeros(max_length, 1, d_model)
+        pe = pe.cuda()
         pe[:, 0, 0::2] = torch.sin(position * div_term)
         pe[:, 0, 1::2] = torch.cos(position * div_term)
         size = pe.size()
@@ -185,34 +186,39 @@ class TransformerModel (nn.Module):
         self.fasta_file = fasta_file
         self.eval_file = eval_file
         self.alphabet = alphabet_string
+
+        #input information
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.ninp = number_sequences(fasta_file)
         self.ntoken = len(token_index_aa) if alphabet_string == 'aa' else len(token_index_codon)
         self.max_length = max_length
         self.tokens = token_index_aa if alphabet_string == 'aa' else token_index_codon
         self.d_model = d_model
         self.pos_encoder = PositionalEncoding(fasta_file, self.max_length, self.alphabet, self.d_model)
-        self.embedding = nn.Embedding(self.ntoken, self.d_model)
+        self.embedding = nn.Embedding(self.ntoken, self.d_model, device = self.device)
         self.tokenizer = encode_aa if alphabet_string == 'aa' else encode_codon
         self.cut = 20 if alphabet_string == 'aa' else 64
-        encoder_layer = TransformerEncoderLayer(d_model, 8, batch_first=True)
+        encoder_layer = TransformerEncoderLayer(d_model, 8, device=self.device, batch_first=True)
         self.transformer_encoder = TransformerEncoder(encoder_layer, 6)
+       
+        decoder_layer = TransformerDecoderLayer(d_model, 8, device=self.device)
+        self.transformer_decoder = torch.nn.TransformerDecoder(decoder_layer, 6)
         #(64 by ntokens) = average up all of the embeddings
         #dimensionality reduction
         #describe how similar the embeddings are
         #if that clusters we're doing well
 
 
-        self.linear = nn.Linear(self.d_model, self.ntoken)
-        self.epochs = 30
+        self.linear = nn.Linear(self.d_model, self.ntoken, device=self.device)
+        self.epochs = 100
         self.batch_size = 1
         self.log_interval = 1
-        self.learning_rate = 0.05
+        self.learning_rate = 0.0001 
         self.loss_function = nn.CrossEntropyLoss()
         self.optimizer = torch.optim.AdamW(self.parameters(), lr=self.learning_rate, weight_decay=0.01)
         self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, 1.0, gamma=0.95)
         self.init_weights()
         print(self.tokens)
-        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     def init_weights(self):
         initrange = 0.1
@@ -221,13 +227,76 @@ class TransformerModel (nn.Module):
         self.linear.weight.data.uniform_(-initrange, initrange)
 
     def forward(self, src):
+        masked = src
         src = self.embedding(src) * math.sqrt(self.d_model)
         src = self.pos_encoder(src)
         encoded = self.transformer_encoder(src)
         output = self.linear(encoded)
         #set to zero for [PAD], [MASK]
         output[:, 27:] = -1e7 #make a hyperparameter
-        return torch.nn.functional.softmax(output)
+        output = torch.nn.functional.softmax(output)
+        return output
+import time
+
+class DummyModel (nn.Module):
+    def __init__(self, d_model, fasta_file, eval_file, alphabet_string, max_length = 512):
+        super(DummyModel, self).__init__()
+        self.model_type = 'Transformer'
+        
+        self.fasta_file = fasta_file
+        self.eval_file = eval_file
+        self.alphabet = alphabet_string
+
+        #input information
+        self.ntoken = len(token_index_aa) if alphabet_string == 'aa' else len(token_index_codon)
+        self.max_length = max_length
+        self.tokens = token_index_aa if alphabet_string == 'aa' else token_index_codon
+        self.d_model = d_model
+        self.pos_encoder = PositionalEncoding(fasta_file, self.max_length, self.alphabet, self.d_model)
+        self.embedding = nn.Embedding(self.ntoken, self.d_model)
+        self.tokenizer = encode_aa if alphabet_string == 'aa' else encode_codon
+        self.cut = 20 if alphabet_string == 'aa' else 64
+        
+        # self.lstm = nn.LSTM(self.nimp, 512, 6, batch_first = True)
+        encoder_layer = TransformerEncoderLayer(d_model, 8)
+        self.transformer_encoder = TransformerEncoder(encoder_layer, 6)
+       
+        decoder_layer = TransformerDecoderLayer(d_model, 8)
+        self.transformer_decoder = torch.nn.TransformerDecoder(decoder_layer, 6)
+        #(64 by ntokens) = average up all of the embeddings
+        #dimensionality reduction
+        #describe how similar the embeddings are
+        #if that clusters we're doing well
+        self.batch_size = 32
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+        self.linear = nn.Linear(self.d_model, self.ntoken)
+        self.epochs = 30
+        self.log_interval = 1
+        self.learning_rate = 0.001 
+        self.loss_function = nn.CrossEntropyLoss()
+        self.optimizer = torch.optim.AdamW(self.parameters(), lr=self.learning_rate, weight_decay=0.01)
+        self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, 1.0, gamma=0.95)
+        self.init_weights()
+
+    def init_weights(self):
+        initrange = 0.1
+        self.embedding.weight.data.uniform_(-initrange, initrange)
+        self.linear.bias.data.zero_()
+        self.linear.weight.data.uniform_(-initrange, initrange)
+
+    def forward(self, src):
+        masked = src
+        src = self.embedding(src) * math.sqrt(self.d_model)
+        # src = self.pos_encoder(src)
+        output = self.linear(src)
+        output = nn.ReLU()(output)
+        output = self.linear(src)
+        #set to zero for [PAD], [MASK]
+        output[:, 27:] = -1e7 #make a hyperparameter
+        output = torch.nn.functional.softmax(output)
+        return output
+
 
 def evaluate(model, epoch):
     model.eval()
@@ -243,16 +312,16 @@ def evaluate(model, epoch):
         for batch in evalloader:
             batch = batch.to(model.device)
             for sequence in batch:
-                masked_sequence = torch.tensor(masking(sequence, 0.15))
+                masked_sequence = torch.tensor(masking(model, sequence, 0.15))
                 out = model(sequence)
                 for k in range(len(masked_sequence)):
-                    current_letter, true_letter = masked_sequence[k].item(), sequence[k].item()
+                    current_letter, true_letter = masked_sequence[k], sequence[k]
                     if current_letter == model.tokens["[MASK]"]:
-                        masking_count[true_letter] += 1
-                        loss = model.loss_function(out[k], torch.tensor(true_letter))
+                        masking_count[true_letter.item()] += 1
+                        loss = model.loss_function(out[k], true_letter)
                         total_loss += loss
                         dist = nn.functional.softmax(out[k]).tolist()
-                        replacement_distributions[true_letter] = np.add(replacement_distributions[true_letter], dist)
+                        replacement_distributions[true_letter.item()] = np.add(replacement_distributions[true_letter.item()], dist)
                 count += 1
     del evalloader
     
@@ -262,9 +331,9 @@ def evaluate(model, epoch):
 
     plt.clf()
     seaborn.heatmap(replacement_distributions[:20, :20])
-    path = 'picture' + str(epoch) + '.png'
+    path = 'pictures_aa_5000_seqs_2/picture' + str(epoch) + '.png'
     plt.savefig(path)
-    save_path = 'saved_model' + str(epoch) + '.pt'
+    save_path = 'pictures_aa_5000_seqs_2/saved_model' + str(epoch) + '.pt'
 
     if epoch % 2 == 0:
         torch.save({
@@ -276,38 +345,44 @@ def evaluate(model, epoch):
     return total_loss
 
 def train(model):
+    train_file = open("train_loss_run2.txt", "a")
+    eval_file = open("eval_loss_run2.txt", "a")
+    masked_seqs_files = open("masked_seqs_run2.txt", "a")
     model.train()
     truth = Data_Set(model, model.fasta_file).data
     truth = torch.from_numpy(np.array(truth))
-    truthloader = DataLoader(truth, 32)
+    truthloader = DataLoader(truth, model.batch_size)
     for epoch in range(model.epochs):
         epoch_loss = 0
         for sequence_batch in truthloader:
-            batch_loss = 0
-            out = model(sequence_batch)
-            print(out)
-            batch_loss = model.loss_function(torch.transpose(out, 1, 2), sequence_batch)
-            batch_loss.backward()
-            model.optimizer.step()
-            model.scheduler.step()
-            model.optimizer.zero_grad()
-            epoch_loss += batch_loss
-            
+            sequence_batch = sequence_batch.to(model.device)
+            for sequence in sequence_batch:
+                sequence_count += 1
+                sequence_loss = 0
+                masked_sequence = torch.tensor(masking(model, sequence, 0.15))
+                out = model(masked_sequence)
+                model.optimizer.zero_grad()
+                print(sequence_count)
+                for k in range(len(masked_sequence)):
+                    current_letter, true_letter = masked_sequence[k], sequence[k]
+                    if current_letter == model.tokens["[MASK]"]:
+                        sequence_loss += model.loss_function(out[k], true_letter)
+                        sequence_losses.append(sequence_loss.item())
+                epoch_loss += sequence_loss
+                sequence_loss.backward()
+                model.optimizer.step()
+                model.scheduler.step()
+                
         if epoch % model.log_interval == 0 or epoch == 0:
-            print("Epoch", epoch+1, "loss", str(epoch_loss))
-            last_sequence = out[-1]
-            print(last_sequence, last_sequence.size())
-            out_index = torch.argmax(last_sequence, dim=1)
-            print(out_index)
-            index_token_aa[25], index_token_aa[26], index_token_aa[27], index_token_aa[28] = '[START]', '[END]', '[MASK]', '[PAD]'
-            out_token = [index_token_aa[index.item()] for index in out_index[0]]
-            print("".join(out_token))
-            print(list(SeqIO.parse(open(model.fasta_file), 'fasta'))[-1].seq)
-            # val_loss = str(evaluate(model, epoch+1))
-            # print("Validation Loss", val_loss)
+            epoch_loss = str(np.mean(sequence_losses))
+            print("Epoch", epoch+1, "loss", epoch_loss)
+            val_loss = str(evaluate(model, epoch_number))
+            print("Validation Loss", val_loss)
             #wandb.log({"loss": float(epoch_loss), "val loss": float(val_loss)})
 
 # wandb.login()
+
+
 
 test_model = TransformerModel(64, 'data/micro_aa.fasta', 'data/micro_test_aa.fasta', 'aa', 512)
 
