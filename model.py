@@ -14,7 +14,7 @@ from torch import nn, Tensor
 from torch.nn import TransformerEncoder, TransformerEncoderLayer, TransformerDecoder, TransformerDecoderLayer
 from torch.utils.data import Dataset, DataLoader
 import sklearn.preprocessing as skp
-import sklearn as sk
+import umap
 
 #from encoder import data_process, token_index_aa, token_index_codon, baseline, masking, encode_aa, encode_codon
 chars_aa = 'ARNDCQEGHILKMFPSTWYVX'
@@ -165,7 +165,7 @@ class PositionalEncoding(nn.Module):
         position = torch.arange(max_length).unsqueeze(1) #(max_length, 1)
         div_term = torch.exp(torch.arange(0, d_model, 2) * (-math.log(10000.0) / d_model))
         pe = torch.zeros(max_length, 1, d_model)
-        pe = pe.cuda()
+        #pe = pe.cuda()
         pe[:, 0, 0::2] = torch.sin(position * div_term)
         pe[:, 0, 1::2] = torch.cos(position * div_term)
         size = pe.size()
@@ -266,7 +266,6 @@ def evaluate(model, epoch):
                     if masked_batch[i][j] == model.tokens["[MASK]"]:
                         masking_count[batch[i][j].item()] += 1
                         replacement_distributions[batch[i][j].item()] = np.add(replacement_distributions[batch[i][j].item()], np.array(out[i][j].cpu()))
-            count += 32
             total_loss += batch_loss
     masking_count = {index:masking_count[index]+1 if masking_count[index]==0 else masking_count[index] for index in masking_count.keys()}
     replacement_distributions = np.array([np.divide(replacement_distributions[key], masking_count[key]) for key in replacement_distributions.keys()])
@@ -343,9 +342,17 @@ def train(model):
     token_counts = {index:token_counts[index]+1 if token_counts[index]==0 else token_counts[index] for index in token_counts.keys()}
     embeddings = {current_token:np.divide(token_embeddings[current_token], token_counts[current_token]) for current_token in token_embeddings.keys()}
     print(embeddings)
+    plt.clf()
+    embedding_array = []
+    for i in range(model.ntoken):
+        embedding_array.append(embeddings[i])
+    reducer = umap.UMAP()
+    data = reducer.fit_transform(embedding_array)
+    plt.scatter(data[:, 0], data[:, 1])
+    plt.show()
 # wandb.login()
 
-test_model = TransformerModel(64,  '/net/scratch3.mit.edu/scratch3-3/shorna/species/archive/68K_train_aa.fasta', '/net/scratch3.mit.edu/scratch3-3/shorna/species/archive/17K_test_aa.fasta', 'aa', 512)
+test_model = TransformerModel(64,  'data/micro_aa.fasta', 'data/micro_test_aa.fasta', 'aa', 512)
 
 # run = wandb.init(
 #     # Set the project where this run will be logged
