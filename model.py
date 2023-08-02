@@ -254,25 +254,31 @@ def evaluate(model, epoch):
             masked_batch = masking(batch, 0.15)
             out = model(masked_batch)
             batch_loss = model.loss_function(torch.transpose(out, 1, 2), batch)
+            for i in range(len(batch)):
+                for j in range(len(batch[i])):
+                    if masked_batch[i][j] == model.tokens["[MASK]"]:
+                        masking_count[batch[i][j].item()] += 1
+                        replacement_distributions[batch[i][j].item()] = np.add(replacement_distributions[batch[i][j].item()], np.array(out[i][j]))
             count += 32
             total_loss += batch_loss
     masking_count = {index:masking_count[index]+1 if masking_count[index]==0 else masking_count[index] for index in masking_count.keys()}
     replacement_distributions = np.array([np.divide(replacement_distributions[key], masking_count[key]) for key in replacement_distributions.keys()])
     replacement_distributions = replacement_distributions[:model.cut, :model.cut]
 
-    # plt.clf()
-    # seaborn.heatmap(replacement_distributions[:20, :20])
-    # path = 'pictures_aa_5000_seqs_2/picture' + str(epoch) + '.png'
-    # plt.savefig(path)
-    # save_path = 'pictures_aa_5000_seqs_2/saved_model' + str(epoch) + '.pt'
+    plt.clf()
+    
+    seaborn.heatmap(replacement_distributions[:20, :20])
+    path = 'picture' + str(epoch) + '.png'
+    plt.savefig(path)
 
-    # if epoch % 2 == 0:
-    #     torch.save({
-    #         'epoch': epoch,
-    #         'model_state_dict': model.state_dict(),
-    #         'optimizer_state_dict': model.optimizer.state_dict(),
-    #         'loss': total_loss/count,
-    #         }, save_path)
+    save_path = 'saved_model' + str(epoch) + '.pt'
+    if epoch % 2 == 0:
+        torch.save({
+            'epoch': epoch,
+            'model_state_dict': model.state_dict(),
+            'optimizer_state_dict': model.optimizer.state_dict(),
+            'loss': total_loss/count,
+            }, save_path)
     return total_loss/len(evalloader)
 
 def train(model):
@@ -292,10 +298,8 @@ def train(model):
             print(count)
             sequence_batch = sequence_batch.to(model.device)
             batch_loss = 0
-            #masked_batch
             masked_batch = masking(sequence_batch, 0.15)
             out = model(masked_batch)
-            #print(out)
             batch_loss = model.loss_function(torch.transpose(out, 1, 2), sequence_batch)
             batch_loss.backward()
             model.optimizer.step()
