@@ -241,7 +241,7 @@ def evaluate(model, epoch):
     model.eval()
     eval_truth = Data_Set(model, model.eval_file).data
     eval_truth = torch.from_numpy(np.array(eval_truth))
-    evalloader = DataLoader(eval_truth)
+    evalloader = DataLoader(eval_truth, model.batch_size)
 
     replacement_distributions = {token: np.array([0]*model.ntoken)  for token in range(len(model.tokens))}
     masking_count = {token:0 for token in range(len(model.tokens))}
@@ -250,44 +250,30 @@ def evaluate(model, epoch):
         total_loss, count = 0, 0
         for batch in evalloader:
             batch = batch.to(model.device)
-            for sequence in batch:
-                masked_sequence = torch.tensor(masking(model, sequence, 0.15))
-                out = model(sequence)
-                for k in range(len(masked_sequence)):
-                    current_letter, true_letter = masked_sequence[k], sequence[k]
-                    if current_letter == model.tokens["[MASK]"]:
-                        masking_count[true_letter.item()] += 1
-                        loss = model.loss_function(out[k], true_letter)
-                        total_loss += loss
-                        dist = nn.functional.softmax(out[k]).tolist()
-                        replacement_distributions[true_letter.item()] = np.add(replacement_distributions[true_letter.item()], dist)
-                count += 1
-    del evalloader
-    
+            batch_loss = 0
+            masked_batch = masking(batch, 0.15)
+            out = model(masked_batch)
+            batch_loss = model.loss_function(torch.transpose(out, 1, 2), batch)
+            count += 32
+            total_loss += batch_loss
     masking_count = {index:masking_count[index]+1 if masking_count[index]==0 else masking_count[index] for index in masking_count.keys()}
     replacement_distributions = np.array([np.divide(replacement_distributions[key], masking_count[key]) for key in replacement_distributions.keys()])
     replacement_distributions = replacement_distributions[:model.cut, :model.cut]
 
-    plt.clf()
-    seaborn.heatmap(replacement_distributions[:20, :20])
-    path = 'pictures_aa_5000_seqs_2/picture' + str(epoch) + '.png'
-    plt.savefig(path)
-    save_path = 'pictures_aa_5000_seqs_2/saved_model' + str(epoch) + '.pt'
+    # plt.clf()
+    # seaborn.heatmap(replacement_distributions[:20, :20])
+    # path = 'pictures_aa_5000_seqs_2/picture' + str(epoch) + '.png'
+    # plt.savefig(path)
+    # save_path = 'pictures_aa_5000_seqs_2/saved_model' + str(epoch) + '.pt'
 
-    if epoch % 2 == 0:
-        torch.save({
-            'epoch': epoch,
-            'model_state_dict': model.state_dict(),
-            'optimizer_state_dict': model.optimizer.state_dict(),
-            'loss': total_loss/count,
-            }, save_path)
-    return total_loss
-    #replacement_distributions = [prob_dist_avg(replacement_distributions[key], model.tokens, masking_count[key]) for key in replacement_distributions]
-    #replacement_distributions = np.array([np.array(torch.Tensor(dist)).tolist() for dist in replacement_distributions])
-    #replacement_distributions = np.transpose(np.array(replacement_distributions))
-    # for i in range(len(replacement_distributions)):
-    #     replacement_distributions[i] = nn.functional.softmax(torch.Tensor(dist))
-    #replacement_distributions = np.transpose(replacement_distributions)
+    # if epoch % 2 == 0:
+    #     torch.save({
+    #         'epoch': epoch,
+    #         'model_state_dict': model.state_dict(),
+    #         'optimizer_state_dict': model.optimizer.state_dict(),
+    #         'loss': total_loss/count,
+    #         }, save_path)
+    return total_loss/len(evalloader)
 
 def train(model):
     train_file = open("train_loss.txt", "a")
@@ -297,10 +283,13 @@ def train(model):
     truth = Data_Set(model, model.fasta_file).data
     truth = torch.from_numpy(np.array(truth))
     truthloader = DataLoader(truth, model.batch_size)
+    count = 0
     for epoch in range(model.epochs):
         epoch_loss = 0
         print(len(truthloader))
         for sequence_batch in truthloader:
+            count += 32
+            print(count)
             sequence_batch = sequence_batch.to(model.device)
             batch_loss = 0
             #masked_batch
@@ -315,18 +304,18 @@ def train(model):
             epoch_loss += batch_loss
 
         if epoch % model.log_interval == 0 or epoch == 0:
-            loss_string = "Epoch" + str(epoch+1) +  "loss" + str(epoch_loss)
+            loss_string = "Epoch" + str(epoch+1) +  "loss" + str(epoch_loss/len(truthloader))
             print(loss_string)
-            text_file = open("train_loss.txt", "w")
-            text_file.write(loss_string)
-            text_file.close()
-            #val_loss = str(evaluate(model, epoch + 1))
-            #print("Validation Loss", val_loss)
+            # text_file = open("train_loss.txt", "w")
+            # text_file.write(loss_string)
+            # text_file.close()
+            val_loss = str(evaluate(model, epoch + 1))
+            print("Validation Loss", val_loss)
             #wandb.log({"loss": float(epoch_loss), "val loss": float(val_loss)})
 
 # wandb.login()
 
-test_model = TransformerModel(64, 'data/micro_aa.fasta', 'data/micro_aa.fasta', 'aa', 512)
+test_model = TransformerModel(64, 'data/micro_aa.fasta', 'data/micro_test_aa.fasta', 'aa', 512)
 
 # run = wandb.init(
 #     # Set the project where this run will be logged
