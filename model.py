@@ -165,7 +165,7 @@ class PositionalEncoding(nn.Module):
         position = torch.arange(max_length).unsqueeze(1) #(max_length, 1)
         div_term = torch.exp(torch.arange(0, d_model, 2) * (-math.log(10000.0) / d_model))
         pe = torch.zeros(max_length, 1, d_model)
-        #pe = pe.cuda()
+        pe = pe.cuda()
         pe[:, 0, 0::2] = torch.sin(position * div_term)
         pe[:, 0, 1::2] = torch.cos(position * div_term)
         size = pe.size()
@@ -265,7 +265,8 @@ def evaluate(model, epoch):
                 for j in range(len(batch[i])):
                     if masked_batch[i][j] == model.tokens["[MASK]"]:
                         masking_count[batch[i][j].item()] += 1
-                        replacement_distributions[batch[i][j].item()] = np.add(replacement_distributions[batch[i][j].item()], np.array(out[i][j]))
+                        replacement_distributions[batch[i][j].item()] = np.add(replacement_distributions[batch[i][j].item()], np.array(out[i][j].cpu()))
+            count += 32
             total_loss += batch_loss
     masking_count = {index:masking_count[index]+1 if masking_count[index]==0 else masking_count[index] for index in masking_count.keys()}
     replacement_distributions = np.array([np.divide(replacement_distributions[key], masking_count[key]) for key in replacement_distributions.keys()])
@@ -274,8 +275,8 @@ def evaluate(model, epoch):
     plt.clf()
     
     seaborn.heatmap(replacement_distributions[:20, :20])
-    path = 'picture' + str(epoch) + '.png'
-    plt.savefig(path)
+    #path = 'picture' + str(epoch) + '.png'
+    #plt.savefig(path)
 
     save_path = 'saved_model' + str(epoch) + '.pt'
     if epoch % 2 == 0:
@@ -344,7 +345,7 @@ def train(model):
     print(embeddings)
 # wandb.login()
 
-test_model = TransformerModel(64, 'data/micro_aa.fasta', 'data/micro_test_aa.fasta', 'aa', 512)
+test_model = TransformerModel(64,  '/net/scratch3.mit.edu/scratch3-3/shorna/species/archive/68K_train_aa.fasta', '/net/scratch3.mit.edu/scratch3-3/shorna/species/archive/17K_test_aa.fasta', 'aa', 512)
 
 # run = wandb.init(
 #     # Set the project where this run will be logged
