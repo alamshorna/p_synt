@@ -258,8 +258,8 @@ def evaluate(model, epoch):
     eval_truth = torch.from_numpy(np.array(eval_truth))
     evalloader = DataLoader(eval_truth, model.batch_size)
 
-    replacement_distributions = {token: torch.zeros(model.d_model) for token in range(len(model.tokens))}
-    masking_count = {token:0 for token in range(len(model.tokens))}
+    replacement_distributions = {token: torch.zeros(model.ntoken) for token in range(model.ntoken)}
+    masking_count = {token:0 for token in range(model.ntoken)}
     for key, value in replacement_distributions.items():
         replacement_distributions[key] = replacement_distributions[key].to(device)
     with torch.no_grad():
@@ -275,7 +275,7 @@ def evaluate(model, epoch):
                     current_token = masked_batch[i][j].item()
                     if current_token == model.tokens["[MASK]"]:
                         masking_count[batch[i][j].item()] += 1
-                        token_embeddings[current_token] = torch.add(token_embeddings[current_token], output_embedding[i][j])
+                        replacement_distributions[current_token] = torch.add(replacement_distributions[current_token], out[i][j])
             total_loss += batch_loss
     masking_count = {index:masking_count[index]+1 if masking_count[index]==0 else masking_count[index] for index in masking_count.keys()}
     replacement_distributions = np.array([np.divide(replacement_distributions[key], masking_count[key]) for key in replacement_distributions.keys()])
