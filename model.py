@@ -278,7 +278,7 @@ def evaluate(model, epoch):
                         replacement_distributions[current_token] = torch.add(replacement_distributions[current_token], out[i][j])
             total_loss += batch_loss
     masking_count = {index:masking_count[index]+1 if masking_count[index]==0 else masking_count[index] for index in masking_count.keys()}
-    replacement_distributions = np.array([np.divide(np.array(replacement_distributions[key].cpu()), masking_count[key]) for key in replacement_distributions.keys()])
+    replacement_distributions =np.array([np.array(torch.divide(replacement_distributions[key], masking_count[key]).cpu()) for key in replacement_distributions.keys()])
     replacement_distributions = replacement_distributions[:model.cut, :model.cut]
 
     plt.clf()
@@ -345,7 +345,7 @@ def train(model):
 
 
     token_counts = {index:token_counts[index]+1 if token_counts[index]==0 else token_counts[index] for index in token_counts.keys()}
-    embeddings = {current_token:np.divide(np.array(token_embeddings[current_token].cpu()), token_counts[current_token]) for current_token in token_embeddings.keys()}
+    embeddings = {current_token:torch.divide(token_embeddings[current_token], token_counts[current_token]) for current_token in token_embeddings.keys()}
     print(embeddings)
     plt.clf()
     embedding_array = []
