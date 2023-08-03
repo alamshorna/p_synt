@@ -357,7 +357,7 @@ def train(model):
     plt.show()
 # wandb.login()
 
-test_model = TransformerModel(64,   '/net/scratch3.mit.edu/scratch3-3/shorna/species/archive/68K_train_aa.fasta', '/net/scratch3.mit.edu/scratch3-3/shorna/species/archive/17K_test_aa.fasta', 'aa', 512)
+test_model = TransformerModel(64, '/net/scratch3.mit.edu/scratch3-3/shorna/species/test_data/micro_aa.fasta', '/net/scratch3.mit.edu/scratch3-3/shorna/species/micro_test_aa.fasta', 'aa', 512)
 
 # run = wandb.init(
 #     # Set the project where this run will be logged
