@@ -278,7 +278,7 @@ def evaluate(model, epoch):
                         replacement_distributions[current_token] = torch.add(replacement_distributions[current_token], out[i][j])
             total_loss += batch_loss
     masking_count = {index:masking_count[index]+1 if masking_count[index]==0 else masking_count[index] for index in masking_count.keys()}
-    replacement_distributions = np.array([np.divide(replacement_distributions[key], masking_count[key]) for key in replacement_distributions.keys()])
+    replacement_distributions = np.array([np.divide(np.array(replacement_distributions[key].cpu()), masking_count[key]) for key in replacement_distributions.keys()])
     replacement_distributions = replacement_distributions[:model.cut, :model.cut]
 
     plt.clf()
@@ -345,7 +345,7 @@ def train(model):
 
 
     token_counts = {index:token_counts[index]+1 if token_counts[index]==0 else token_counts[index] for index in token_counts.keys()}
-    embeddings = {current_token:np.divide(token_embeddings[current_token], token_counts[current_token]) for current_token in token_embeddings.keys()}
+    embeddings = {current_token:np.divide(np.array(token_embeddings[current_token].cpu()), token_counts[current_token]) for current_token in token_embeddings.keys()}
     print(embeddings)
     plt.clf()
     embedding_array = []
@@ -357,7 +357,7 @@ def train(model):
     plt.show()
 # wandb.login()
 
-test_model = TransformerModel(64,   '/net/scratch3.mit.edu/scratch3-3/shorna/species/archive/68K_train_aa.fasta', '/net/scratch3.mit.edu/scratch3-3/shorna/species/archive/17K_test_aa.fasta', 'aa', 512)
+test_model = TransformerModel(64,   'data/micro_aa.fasta', 'data/micro_test_aa.fasta', 'aa', 512)
 
 # run = wandb.init(
 #     # Set the project where this run will be logged
