@@ -258,28 +258,24 @@ def evaluate(model, epoch):
     eval_truth = torch.from_numpy(np.array(eval_truth))
     evalloader = DataLoader(eval_truth, model.batch_size)
 
-    replacement_distributions = {token: np.array([0]*model.ntoken)  for token in range(len(model.tokens))}
+    replacement_distributions = {token: torch.zeros(model.d_model) for token in range(len(model.tokens))}
     masking_count = {token:0 for token in range(len(model.tokens))}
-
+    for key, value in replacement_distributions.items():
+        replacement_distributions[key] = replacement_distributions[key].to(device)
     with torch.no_grad():
         total_loss =  0
         for batch in evalloader:
             batch = batch.to(model.device)
             batch_loss = 0
             masked_batch, mask_tensor = masking(batch, 0.15, model.tokens['[MASK]'])
-            out, trash = model(masked_batch)
-
-
-            for k in range(batch.size()[0]):
-                for l in range(model.max_length):
-                    if l not in mask_tensor[k]:
-                        batch[k][l] = -100
+            out, output_embedding = model(masked_batch)
             batch_loss = model.loss_function(torch.transpose(out, 1, 2), batch)
             for i in range(len(batch)):
                 for j in range(len(batch[i])):
-                    if masked_batch[i][j] == model.tokens["[MASK]"]:
+                    current_token = masked_batch[i][j].item()
+                    if current_token == model.tokens["[MASK]"]:
                         masking_count[batch[i][j].item()] += 1
-                        replacement_distributions[batch[i][j].item()] = np.add(replacement_distributions[batch[i][j].item()], np.array(out[i][j].cpu()))
+                        token_embeddings[current_token] = torch.add(token_embeddings[current_token], output_embedding[i][j])
             total_loss += batch_loss
     masking_count = {index:masking_count[index]+1 if masking_count[index]==0 else masking_count[index] for index in masking_count.keys()}
     replacement_distributions = np.array([np.divide(replacement_distributions[key], masking_count[key]) for key in replacement_distributions.keys()])
