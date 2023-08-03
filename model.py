@@ -173,7 +173,7 @@ class PositionalEncoding(nn.Module):
         position = torch.arange(max_length).unsqueeze(1) #(max_length, 1)
         div_term = torch.exp(torch.arange(0, d_model, 2) * (-math.log(10000.0) / d_model))
         pe = torch.zeros(max_length, 1, d_model)
-        #pe = pe.cuda()
+        pe = pe.cuda()
         pe[:, 0, 0::2] = torch.sin(position * div_term)
         pe[:, 0, 1::2] = torch.cos(position * div_term)
         size = pe.size()
@@ -313,6 +313,8 @@ def train(model):
     count = 0
     token_embeddings = {token: torch.zeros(model.d_model) for token in range(model.ntoken)}
     token_counts = {token:0 for token in range(model.d_model)}
+    for key, value in token_embeddings.items():
+            token_embeddings[key] = token_embeddings[key].to(device)
     for epoch in range(model.epochs):
         epoch_loss = 0
         print(len(truthloader))
@@ -359,7 +361,7 @@ def train(model):
     plt.show()
 # wandb.login()
 
-test_model = TransformerModel(64,  'data/micro_aa.fasta', 'data/micro_test_aa.fasta', 'aa', 512)
+test_model = TransformerModel(64,   '/net/scratch3.mit.edu/scratch3-3/shorna/species/archive/68K_train_aa.fasta', '/net/scratch3.mit.edu/scratch3-3/shorna/species/archive/17K_test_aa.fasta', 'aa', 512)
 
 # run = wandb.init(
 #     # Set the project where this run will be logged
