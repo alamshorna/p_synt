@@ -115,16 +115,20 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 mask_token_index = token_index_aa['[MASK]']
 
 #masking function
-def masking(tokenized_tensor, masking_proportion, mask_token_index, batch_size = 32):
+def masking(tokenized_tensor, masking_proportion, mask_token_index, batch_size = 32, max_len = 512):
     masked_tensor = tokenized_tensor.clone()
     num_tokens_to_mask = int(masking_proportion * len(tokenized_tensor[0]))
     mask_tensors = []
-    i = 0
-    for masked_sequence in masked_tensor:
+    for i in range(len(masked_tensor)):
+        masked_sequence = masked_tensor[i]
         masked_indices = torch.randperm(len(tokenized_tensor[0]))[:num_tokens_to_mask]
+        all_indices = torch.tensor([i for i in range(max_len)])
+        both = torch.cat((masked_indices, all_indices))
+        singles, counts = both.unique(return_counts=True)
+        difference = singles[counts == 1]
         mask_tensors.append(masked_indices.tolist())
         masked_sequence[masked_indices] = mask_token_index  # Replace with [MASK] token
-        i += 1
+        tokenized_tensor[i][difference] = -100
     return masked_tensor, torch.tensor(mask_tensors)
 
 def data_process(model, fasta):
@@ -264,6 +268,8 @@ def evaluate(model, epoch):
             batch_loss = 0
             masked_batch, mask_tensor = masking(batch, 0.15, model.tokens['[MASK]'])
             out, trash = model(masked_batch)
+
+
             for k in range(batch.size()[0]):
                 for l in range(model.max_length):
                     if l not in mask_tensor[k]:
@@ -305,7 +311,7 @@ def train(model):
     truth = torch.from_numpy(np.array(truth))
     truthloader = DataLoader(truth, model.batch_size)
     count = 0
-    token_embeddings = {token: np.array([0]*model.d_model) for token in range(model.ntoken)}
+    token_embeddings = {token: torch.zeros(model.d_model) for token in range(model.ntoken)}
     token_counts = {token:0 for token in range(model.d_model)}
     for epoch in range(model.epochs):
         epoch_loss = 0
@@ -317,10 +323,6 @@ def train(model):
             batch_loss = 0
             masked_batch, mask_tensor = masking(sequence_batch, 0.15, model.tokens['[MASK]'], model.batch_size)
             out, output_embedding = model(masked_batch)
-            for k in range(sequence_batch.size()[0]):
-                for l in range(model.max_length):
-                    if l not in mask_tensor[k]:
-                        sequence_batch[k][l] = -100
             batch_loss = model.loss_function(torch.transpose(out, 1, 2), sequence_batch)
             batch_loss.backward()
             model.optimizer.step()
@@ -331,7 +333,7 @@ def train(model):
                 for j in range(len(sequence_batch[i])):
                     current_token = sequence_batch[i][j].item()
                     if current_token != -100:
-                        token_embeddings[current_token] = np.add(token_embeddings[current_token], output_embedding[i][j].cpu().detach().numpy())
+                        token_embeddings[current_token] = torch.add(token_embeddings[current_token], output_embedding[i][j])
                         token_counts[current_token] += 1
         if epoch % model.log_interval == 0 or epoch == 0:
             loss_string = "Epoch " + str(epoch+1) +  " loss " + str(epoch_loss/len(truthloader))
