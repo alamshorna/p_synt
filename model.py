@@ -115,13 +115,17 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 mask_token_index = token_index_aa['[MASK]']
 
 #masking function
-def masking(tokenized_tensor, masking_proportion, mask_token_index):
+def masking(tokenized_tensor, masking_proportion, mask_token_index, batch_size = 32):
     masked_tensor = tokenized_tensor.clone()
     num_tokens_to_mask = int(masking_proportion * len(tokenized_tensor[0]))
+    mask_tensors = []
+    i = 0
     for masked_sequence in masked_tensor:
         masked_indices = torch.randperm(len(tokenized_tensor[0]))[:num_tokens_to_mask]
+        mask_tensors.append(masked_indices.tolist())
         masked_sequence[masked_indices] = mask_token_index  # Replace with [MASK] token
-    return masked_tensor
+        i += 1
+    return masked_tensor, torch.tensor(mask_tensors)
 
 def data_process(model, fasta):
     """
@@ -211,11 +215,11 @@ class TransformerModel (nn.Module):
 
 
         self.linear = nn.Linear(self.d_model, self.ntoken, device=self.device)
-        self.epochs = 1
+        self.epochs = 30
         self.batch_size = 32
         self.log_interval = 1
         self.learning_rate = 0.0001 
-        self.loss_function = nn.CrossEntropyLoss()
+        self.loss_function = nn.CrossEntropyLoss(size_average = True, ignore_index = -100)
         self.optimizer = torch.optim.AdamW(self.parameters(), lr=self.learning_rate, weight_decay=0.01)
         self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, 1.0, gamma=0.95)
         self.init_weights()
@@ -258,8 +262,12 @@ def evaluate(model, epoch):
         for batch in evalloader:
             batch = batch.to(model.device)
             batch_loss = 0
-            masked_batch = masking(batch, 0.15, model.tokens['[MASK]'])
+            masked_batch, mask_tensor = masking(batch, 0.15, model.tokens['[MASK]'])
             out, trash = model(masked_batch)
+            for k in range(batch.size()[0]):
+                for l in range(model.max_length):
+                    if l not in mask_tensor[k]:
+                        batch[k][l] = -100
             batch_loss = model.loss_function(torch.transpose(out, 1, 2), batch)
             for i in range(len(batch)):
                 for j in range(len(batch[i])):
@@ -307,10 +315,12 @@ def train(model):
             print(count)
             sequence_batch = sequence_batch.to(model.device)
             batch_loss = 0
-            masked_batch = masking(sequence_batch, 0.15, model.tokens['[MASK]'])
+            masked_batch, mask_tensor = masking(sequence_batch, 0.15, model.tokens['[MASK]'], model.batch_size)
             out, output_embedding = model(masked_batch)
-            # print(output_embedding.size())
-            # print(sequence_batch, sequence_batch.size())
+            for k in range(sequence_batch.size()[0]):
+                for l in range(model.max_length):
+                    if l not in mask_tensor[k]:
+                        sequence_batch[k][l] = -100
             batch_loss = model.loss_function(torch.transpose(out, 1, 2), sequence_batch)
             batch_loss.backward()
             model.optimizer.step()
@@ -320,23 +330,18 @@ def train(model):
             for i in range(len(sequence_batch)):
                 for j in range(len(sequence_batch[i])):
                     current_token = sequence_batch[i][j].item()
-                    #print(current_token)
-                    #print(output_embedding[i][j])
-                    #print(token_embeddings[current_token])
-                    token_embeddings[current_token] = np.add(token_embeddings[current_token], output_embedding[i][j].cpu().detach().numpy())
-                    token_counts[current_token] += 1
+                    if current_token != -100:
+                        token_embeddings[current_token] = np.add(token_embeddings[current_token], output_embedding[i][j].cpu().detach().numpy())
+                        token_counts[current_token] += 1
         if epoch % model.log_interval == 0 or epoch == 0:
-            loss_string = "Epoch" + str(epoch+1) +  "loss" + str(epoch_loss/len(truthloader))
-            print("Epoch Loss", loss_string)
+            loss_string = "Epoch " + str(epoch+1) +  " loss " + str(epoch_loss/len(truthloader))
+            print(loss_string)
             train_file.write(loss_string)
             val_loss = str(evaluate(model, epoch + 1))
             train_file.write(val_loss)
             print("Validation Loss", val_loss)
             #wandb.log({"loss": float(epoch_loss), "val loss": float(val_loss)})
     # extract_embeddings(embeddings_file)
-    for current_token in token_embeddings.keys():
-        print(current_token, type(current_token))
-        print(token_counts[current_token], type(token_counts[current_token]))
 
 
     token_counts = {index:token_counts[index]+1 if token_counts[index]==0 else token_counts[index] for index in token_counts.keys()}
