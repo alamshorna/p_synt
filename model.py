@@ -117,6 +117,7 @@ mask_token_index = token_index_aa['[MASK]']
 #masking function
 def masking(tokenized_tensor, masking_proportion, mask_token_index, batch_size = 32, max_len = 512):
     masked_tensor = tokenized_tensor.clone()
+    ignore_tensor = tokenized_tensor.clone()
     num_tokens_to_mask = int(masking_proportion * len(tokenized_tensor[0]))
     mask_tensors = []
     for i in range(len(masked_tensor)):
@@ -128,8 +129,8 @@ def masking(tokenized_tensor, masking_proportion, mask_token_index, batch_size =
         difference = singles[counts == 1]
         mask_tensors.append(masked_indices.tolist())
         masked_sequence[masked_indices] = mask_token_index  # Replace with [MASK] token
-        tokenized_tensor[i][difference] = -100
-    return masked_tensor, torch.tensor(mask_tensors)
+        ignore_tensor[i][difference] = -100
+    return masked_tensor, torch.tensor(mask_tensors), ignore_tensor
 
 def data_process(model, fasta):
     """
@@ -207,7 +208,7 @@ class TransformerModel (nn.Module):
         self.embedding = nn.Embedding(self.ntoken, self.d_model, device = self.device)
         self.tokenizer = encode_aa if alphabet_string == 'aa' else encode_codon
         self.cut = 20 if alphabet_string == 'aa' else 64
-        encoder_layer = TransformerEncoderLayer(d_model, 8, device=self.device, batch_first=True)
+        encoder_layer = TransformerEncoderLayer(d_model, 8, device=self.device, batch_first=True, norm_first = True)
         self.transformer_encoder = TransformerEncoder(encoder_layer, 6)
        
         decoder_layer = TransformerDecoderLayer(d_model, 8)
@@ -219,7 +220,7 @@ class TransformerModel (nn.Module):
 
 
         self.linear = nn.Linear(self.d_model, self.ntoken, device=self.device)
-        self.epochs = 30
+        self.epochs = 10
         self.batch_size = 32
         self.log_interval = 1
         self.learning_rate = 0.0001 
@@ -231,9 +232,11 @@ class TransformerModel (nn.Module):
 
     def init_weights(self):
         initrange = 0.1
-        self.embedding.weight.data.uniform_(-initrange, initrange)
+        nn.init.uniform_(self.embedding.weight, -math.sqrt(1/self.d_model), math.sqrt(1/self.d_model))
+        #self.embedding.weight.data.uniform_(-initrange, initrange)
         self.linear.bias.data.zero_()
-        self.linear.weight.data.uniform_(-initrange, initrange)
+        nn.init.xavier_uniform_(self.linear.weight)
+        #self.linear.weight.data.uniform_(-initrange, initrange)
 
     def forward(self, src):
         src = self.embedding(src) * math.sqrt(self.d_model)
@@ -267,9 +270,9 @@ def evaluate(model, epoch):
         for batch in evalloader:
             batch = batch.to(model.device)
             batch_loss = 0
-            masked_batch, mask_tensor = masking(batch, 0.15, model.tokens['[MASK]'])
+            masked_batch, mask_tensor, ignore_tensor = masking(batch, 0.95, model.tokens['[MASK]'])
             out, output_embedding = model(masked_batch)
-            batch_loss = model.loss_function(torch.transpose(out, 1, 2), batch)
+            batch_loss = model.loss_function(torch.transpose(out, 1, 2), ignore_tensor)
             for i in range(len(batch)):
                 for j in range(len(batch[i])):
                     current_token = masked_batch[i][j].item()
@@ -319,20 +322,25 @@ def train(model):
             print(count)
             sequence_batch = sequence_batch.to(model.device)
             batch_loss = 0
-            masked_batch, mask_tensor = masking(sequence_batch, 0.15, model.tokens['[MASK]'], model.batch_size)
+            masked_batch, mask_tensor, ignore_tensor = masking(sequence_batch, 0.95, model.tokens['[MASK]'], model.batch_size)
+            #print(masked_batch, masked_batch.size())
+            #print(mask_tensor, mask_tensor.size())
+            #print(ignore_tensor, ignore_tensor.size())
             out, output_embedding = model(masked_batch)
-            batch_loss = model.loss_function(torch.transpose(out, 1, 2), sequence_batch)
+            batch_loss = model.loss_function(torch.transpose(out, 1, 2), ignore_tensor)
             batch_loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             model.optimizer.step()
             model.scheduler.step()
             model.optimizer.zero_grad()
             epoch_loss += batch_loss
-            for i in range(len(sequence_batch)):
-                for j in range(len(sequence_batch[i])):
-                    current_token = sequence_batch[i][j].item()
-                    if current_token != -100:
-                        token_embeddings[current_token] = torch.add(token_embeddings[current_token], output_embedding[i][j])
-                        token_counts[current_token] += 1
+            if epoch+1 == model.epochs:
+                for i in range(len(sequence_batch)):
+                    for j in range(len(sequence_batch[i])):
+                        current_token = sequence_batch[i][j].item()
+                        if current_token != -100:
+                            token_embeddings[current_token] = torch.add(token_embeddings[current_token], output_embedding[i][j])
+                            token_counts[current_token] += 1
         if epoch % model.log_interval == 0 or epoch == 0:
             loss_string = "Epoch " + str(epoch+1) +  " loss " + str(epoch_loss/len(truthloader))
             print(loss_string)
@@ -347,17 +355,27 @@ def train(model):
     token_counts = {index:token_counts[index]+1 if token_counts[index]==0 else token_counts[index] for index in token_counts.keys()}
     embeddings = {current_token:torch.divide(token_embeddings[current_token], token_counts[current_token]) for current_token in token_embeddings.keys()}
     print(embeddings)
+    
     plt.clf()
     embedding_array = []
     for i in range(model.ntoken):
-        embedding_array.append(embeddings[i])
-    reducer = umap.UMAP()
+        embedding_array.append(embeddings[i].cpu().detach().numpy())
+    embedding_array = np.array(embedding_array)
+    reducer = umap.UMAP().fit(embedding_array)
+    print(list(token_embeddings.keys())[0])
+    print(type(token_embeddings.keys()))
+    # umap.plot.points(reducer, labels = list(token_embeddings.keys()), theme = 'fire')
+    
+    embedding_array = embedding_array[:model.cut, :model.cut]
     data = reducer.fit_transform(embedding_array)
     plt.scatter(data[:, 0], data[:, 1])
-    plt.show()
+    for i in range(model.cut):
+        plt.text(data[:, 0][i], data[:, 1][i], list(model.tokens.keys())[i])
+    save_path = 'embedding_uMAP.png'
+    plt.savefig(save_path)
 # wandb.login()
 
-test_model = TransformerModel(64,   'data/micro_aa.fasta', 'data/micro_test_aa.fasta', 'aa', 512)
+test_model = TransformerModel(64,  '/net/scratch3.mit.edu/scratch3-3/shorna/species/archive/17K_test_aa.fasta', '/net/scratch3.mit.edu/scratch3-3/shorna/species/test_data/micro_aa.fasta', 'aa', 512)
 
 
 # run = wandb.init(
