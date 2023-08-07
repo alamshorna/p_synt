@@ -174,7 +174,7 @@ class PositionalEncoding(nn.Module):
         position = torch.arange(max_length).unsqueeze(1) #(max_length, 1)
         div_term = torch.exp(torch.arange(0, d_model, 2) * (-math.log(10000.0) / d_model))
         pe = torch.zeros(max_length, 1, d_model)
-        pe = pe.cuda()
+        #pe = pe.cuda()
         pe[:, 0, 0::2] = torch.sin(position * div_term)
         pe[:, 0, 1::2] = torch.cos(position * div_term)
         size = pe.size()
@@ -248,13 +248,6 @@ class TransformerModel (nn.Module):
         #output = torch.nn.functional.softmax(output)
         return output, encoded
 
-def extract_embeddings(file_path):
-    #write some code here that takes embeddings and sequences and returns an average of each
-    #then performs a uMAP on that
-    
-
-    return
-
 def evaluate(model, epoch):
     model.eval()
     eval_truth = Data_Set(model, model.eval_file).data
@@ -270,22 +263,26 @@ def evaluate(model, epoch):
         for batch in evalloader:
             batch = batch.to(model.device)
             batch_loss = 0
-            masked_batch, mask_tensor, ignore_tensor = masking(batch, 0.95, model.tokens['[MASK]'])
+            masked_batch, mask_tensor, ignore_tensor = masking(batch, 0.15, model.tokens['[MASK]'])
             out, output_embedding = model(masked_batch)
             batch_loss = model.loss_function(torch.transpose(out, 1, 2), ignore_tensor)
             for i in range(len(batch)):
                 for j in range(len(batch[i])):
                     current_token = masked_batch[i][j].item()
+                    true_token = batch[i][j].item()
                     if current_token == model.tokens["[MASK]"]:
                         masking_count[batch[i][j].item()] += 1
-                        replacement_distributions[current_token] = torch.add(replacement_distributions[current_token], out[i][j])
+                        replacement_distributions[true_token] = torch.add(replacement_distributions[current_token], out[i][j])
+                        print(replacement_distributions[true_token])
             total_loss += batch_loss
+    print(replacement_distributions)
     masking_count = {index:masking_count[index]+1 if masking_count[index]==0 else masking_count[index] for index in masking_count.keys()}
-    replacement_distributions =np.array([np.array(torch.divide(replacement_distributions[key], masking_count[key]).cpu()) for key in replacement_distributions.keys()])
+    replacement_distributions = np.array([np.array(torch.divide(replacement_distributions[key], masking_count[key]).cpu()) for key in replacement_distributions.keys()])
     replacement_distributions = replacement_distributions[:model.cut, :model.cut]
 
+    print(replacement_distributions)
     plt.clf()
-    
+    np.savetxt('unnormalized.csv', replacement_distributions[:20, :20])
     seaborn.heatmap(replacement_distributions[:20, :20])
     #path = 'picture' + str(epoch) + '.png'
     #plt.savefig(path)
@@ -322,7 +319,7 @@ def train(model):
             print(count)
             sequence_batch = sequence_batch.to(model.device)
             batch_loss = 0
-            masked_batch, mask_tensor, ignore_tensor = masking(sequence_batch, 0.95, model.tokens['[MASK]'], model.batch_size)
+            masked_batch, mask_tensor, ignore_tensor = masking(sequence_batch, 0.15, model.tokens['[MASK]'], model.batch_size)
             #print(masked_batch, masked_batch.size())
             #print(mask_tensor, mask_tensor.size())
             #print(ignore_tensor, ignore_tensor.size())
@@ -367,6 +364,7 @@ def train(model):
     # umap.plot.points(reducer, labels = list(token_embeddings.keys()), theme = 'fire')
     
     embedding_array = embedding_array[:model.cut, :model.cut]
+
     data = reducer.fit_transform(embedding_array)
     plt.scatter(data[:, 0], data[:, 1])
     for i in range(model.cut):
@@ -375,7 +373,7 @@ def train(model):
     plt.savefig(save_path)
 # wandb.login()
 
-test_model = TransformerModel(64,  '/net/scratch3.mit.edu/scratch3-3/shorna/species/archive/17K_test_aa.fasta', '/net/scratch3.mit.edu/scratch3-3/shorna/species/test_data/micro_aa.fasta', 'aa', 512)
+test_model = TransformerModel(64,  'data/micro_aa.fasta', 'data/micro_test_aa.fasta', 'aa', 512)
 
 
 # run = wandb.init(
