@@ -181,9 +181,10 @@ class PositionalEncoding(nn.Module):
         self.pe = pe #.reshape(size[2], size[0], size[1])
 
     def forward(self, embedding):
-        # embedding = embedding.unsqueeze(1)
-        embedding = embedding + self.pe[:embedding.size(0)]
-        return embedding.squeeze(1)
+        for i in range(embedding.size(0)):
+            embedding[i] = embedding[i] + self.pe.squeeze(1)
+            #print(i, self.pe.squeeze(1))
+        return embedding
     
 def number_sequences(fasta_file):
     fasta_data = list(SeqIO.parse(open(fasta_file), 'fasta'))
@@ -205,11 +206,12 @@ class TransformerModel (nn.Module):
         self.tokens = token_index_aa if alphabet_string == 'aa' else token_index_codon
         self.d_model = d_model
         self.pos_encoder = PositionalEncoding(fasta_file, self.max_length, self.alphabet, self.d_model)
+        print(self.pos_encoder.pe)
         self.embedding = nn.Embedding(self.ntoken, self.d_model, device = self.device)
         self.tokenizer = encode_aa if alphabet_string == 'aa' else encode_codon
         self.cut = 20 if alphabet_string == 'aa' else 64
         encoder_layer = TransformerEncoderLayer(d_model, 8, device=self.device, batch_first=True, norm_first = True)
-        self.transformer_encoder = TransformerEncoder(encoder_layer, 6)
+        self.transformer_encoder = TransformerEncoder(encoder_layer, 12)
        
         decoder_layer = TransformerDecoderLayer(d_model, 8)
         self.transformer_decoder = torch.nn.TransformerDecoder(decoder_layer, 6)
@@ -223,7 +225,7 @@ class TransformerModel (nn.Module):
         self.epochs = 10
         self.batch_size = 32
         self.log_interval = 1
-        self.learning_rate = 0.0001 
+        self.learning_rate = 0.00001 
         self.loss_function = nn.CrossEntropyLoss(size_average = True, ignore_index = -100)
         self.optimizer = torch.optim.AdamW(self.parameters(), lr=self.learning_rate, weight_decay=0.01)
         self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, 1.0, gamma=0.95)
@@ -239,8 +241,11 @@ class TransformerModel (nn.Module):
         #self.linear.weight.data.uniform_(-initrange, initrange)
 
     def forward(self, src):
+        #print('original', src, src.size())
         src = self.embedding(src) * math.sqrt(self.d_model)
+        #print('embedding', src, src.size())
         src = self.pos_encoder(src)
+        #print('pos encoded', src, src.size())
         encoded = self.transformer_encoder(src)
         output = self.linear(encoded)
         #set to zero for [PAD], [MASK]
@@ -263,8 +268,9 @@ def evaluate(model, epoch):
         for batch in evalloader:
             batch = batch.to(model.device)
             batch_loss = 0
-            masked_batch, mask_tensor, ignore_tensor = masking(batch, 0.15, model.tokens['[MASK]'])
+            masked_batch, mask_tensor, ignore_tensor = masking(batch, 0.01, model.tokens['[MASK]'])
             out, output_embedding = model(masked_batch)
+            #print(out)
             batch_loss = model.loss_function(torch.transpose(out, 1, 2), ignore_tensor)
             for i in range(len(batch)):
                 for j in range(len(batch[i])):
@@ -272,15 +278,14 @@ def evaluate(model, epoch):
                     true_token = batch[i][j].item()
                     if current_token == model.tokens["[MASK]"]:
                         masking_count[batch[i][j].item()] += 1
+                        #print(out[i][j])
                         replacement_distributions[true_token] = torch.add(replacement_distributions[current_token], out[i][j])
-                        print(replacement_distributions[true_token])
             total_loss += batch_loss
-    print(replacement_distributions)
     masking_count = {index:masking_count[index]+1 if masking_count[index]==0 else masking_count[index] for index in masking_count.keys()}
     replacement_distributions = np.array([np.array(torch.divide(replacement_distributions[key], masking_count[key]).cpu()) for key in replacement_distributions.keys()])
-    replacement_distributions = replacement_distributions[:model.cut, :model.cut]
+    #replacement_distributions = replacement_distributions[:model.cut, :model.cut]
 
-    print(replacement_distributions)
+    #print(replacement_distributions)
     plt.clf()
     np.savetxt('unnormalized.csv', replacement_distributions[:20, :20])
     seaborn.heatmap(replacement_distributions[:20, :20])
@@ -316,10 +321,11 @@ def train(model):
         print(len(truthloader))
         for sequence_batch in truthloader:
             count += 32
+
             print(count)
             sequence_batch = sequence_batch.to(model.device)
             batch_loss = 0
-            masked_batch, mask_tensor, ignore_tensor = masking(sequence_batch, 0.15, model.tokens['[MASK]'], model.batch_size)
+            masked_batch, mask_tensor, ignore_tensor = masking(sequence_batch, 0.01, model.tokens['[MASK]'], model.batch_size)
             #print(masked_batch, masked_batch.size())
             #print(mask_tensor, mask_tensor.size())
             #print(ignore_tensor, ignore_tensor.size())
@@ -373,7 +379,7 @@ def train(model):
     plt.savefig(save_path)
 # wandb.login()
 
-test_model = TransformerModel(64,  'data/micro_aa.fasta', 'data/micro_test_aa.fasta', 'aa', 512)
+test_model = TransformerModel(64,  'data/single_aa.fasta', 'data/singla_test_aa.fasta', 'aa', 512)
 
 
 # run = wandb.init(
