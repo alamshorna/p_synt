@@ -206,7 +206,6 @@ class TransformerModel (nn.Module):
         self.tokens = token_index_aa if alphabet_string == 'aa' else token_index_codon
         self.d_model = d_model
         self.pos_encoder = PositionalEncoding(fasta_file, self.max_length, self.alphabet, self.d_model)
-        print(self.pos_encoder.pe)
         self.embedding = nn.Embedding(self.ntoken, self.d_model, device = self.device)
         self.tokenizer = encode_aa if alphabet_string == 'aa' else encode_codon
         self.cut = 20 if alphabet_string == 'aa' else 64
@@ -225,7 +224,7 @@ class TransformerModel (nn.Module):
         self.epochs = 10
         self.batch_size = 32
         self.log_interval = 1
-        self.learning_rate = 0.00001 
+        self.learning_rate = 0.004 
         self.loss_function = nn.CrossEntropyLoss(size_average = True, ignore_index = -100)
         self.optimizer = torch.optim.AdamW(self.parameters(), lr=self.learning_rate, weight_decay=0.01)
         self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, 1.0, gamma=0.95)
@@ -242,6 +241,7 @@ class TransformerModel (nn.Module):
 
     def forward(self, src):
         #print('original', src, src.size())
+        #print(src)
         src = self.embedding(src) * math.sqrt(self.d_model)
         #print('embedding', src, src.size())
         src = self.pos_encoder(src)
@@ -250,6 +250,7 @@ class TransformerModel (nn.Module):
         output = self.linear(encoded)
         #set to zero for [PAD], [MASK]
         #output[:, 27:] = -1e7 #make a hyperparameter
+        #print(output)
         #output = torch.nn.functional.softmax(output)
         return output, encoded
 
@@ -268,7 +269,7 @@ def evaluate(model, epoch):
         for batch in evalloader:
             batch = batch.to(model.device)
             batch_loss = 0
-            masked_batch, mask_tensor, ignore_tensor = masking(batch, 0.01, model.tokens['[MASK]'])
+            masked_batch, mask_tensor, ignore_tensor = masking(batch, 0.15, model.tokens['[MASK]'])
             out, output_embedding = model(masked_batch)
             #print(out)
             batch_loss = model.loss_function(torch.transpose(out, 1, 2), ignore_tensor)
@@ -289,8 +290,8 @@ def evaluate(model, epoch):
     plt.clf()
     np.savetxt('unnormalized.csv', replacement_distributions[:20, :20])
     seaborn.heatmap(replacement_distributions[:20, :20])
-    #path = 'picture' + str(epoch) + '.png'
-    #plt.savefig(path)
+    path = 'picture' + str(epoch) + '.png'
+    plt.savefig(path)
 
     save_path = 'saved_model' + str(epoch) + '.pt'
     if epoch % 2 == 0:
@@ -321,15 +322,14 @@ def train(model):
         print(len(truthloader))
         for sequence_batch in truthloader:
             count += 32
-
             print(count)
             sequence_batch = sequence_batch.to(model.device)
             batch_loss = 0
-            masked_batch, mask_tensor, ignore_tensor = masking(sequence_batch, 0.01, model.tokens['[MASK]'], model.batch_size)
-            #print(masked_batch, masked_batch.size())
-            #print(mask_tensor, mask_tensor.size())
-            #print(ignore_tensor, ignore_tensor.size())
+            masked_batch, mask_tensor, ignore_tensor = masking(sequence_batch, 0.15, model.tokens['[MASK]'], model.batch_size)
             out, output_embedding = model(masked_batch)
+            # print(sequence_batch, sequence_batch.size(), masked_batch, masked_batch.size())
+            # print(mask_tensor, mask_tensor.size(), ignore_tensor, ignore_tensor.size())
+            # print(out, out.size(), output_embedding, output_embedding.size())
             batch_loss = model.loss_function(torch.transpose(out, 1, 2), ignore_tensor)
             batch_loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
@@ -379,8 +379,7 @@ def train(model):
     plt.savefig(save_path)
 # wandb.login()
 
-test_model = TransformerModel(64,  'data/single_aa.fasta', 'data/singla_test_aa.fasta', 'aa', 512)
-
+test_model = TransformerModel(64,  'data/micro_aa.fasta', 'data/micro_test_aa.fasta', 'aa', 512)
 
 # run = wandb.init(
 #     # Set the project where this run will be logged
