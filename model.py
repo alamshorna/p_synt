@@ -115,7 +115,7 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 mask_token_index = token_index_aa['[MASK]']
 
 #masking function
-def masking(tokenized_tensor, masking_proportion, mask_token_index, batch_size = 32, max_len = 512):
+def masking(tokenized_tensor, masking_proportion, mask_token_index, batch_size = 32, max_len = 256):
     masked_tensor = tokenized_tensor.clone()
     ignore_tensor = tokenized_tensor.clone()
     num_tokens_to_mask = int(masking_proportion * len(tokenized_tensor[0]))
@@ -210,7 +210,7 @@ class TransformerModel (nn.Module):
         self.tokenizer = encode_aa if alphabet_string == 'aa' else encode_codon
         self.cut = 20 if alphabet_string == 'aa' else 64
         encoder_layer = TransformerEncoderLayer(d_model, 8, device=self.device, batch_first=True, norm_first = True)
-        self.transformer_encoder = TransformerEncoder(encoder_layer, 12)
+        self.transformer_encoder = TransformerEncoder(encoder_layer, 24)
        
         decoder_layer = TransformerDecoderLayer(d_model, 8)
         self.transformer_decoder = torch.nn.TransformerDecoder(decoder_layer, 6)
@@ -224,10 +224,10 @@ class TransformerModel (nn.Module):
         self.epochs = 10
         self.batch_size = 32
         self.log_interval = 1
-        self.learning_rate = 0.004 
+        self.learning_rate = 0.005 
         self.loss_function = nn.CrossEntropyLoss(size_average = True, ignore_index = -100)
         self.optimizer = torch.optim.AdamW(self.parameters(), lr=self.learning_rate, weight_decay=0.01)
-        self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, 1.0, gamma=0.95)
+        self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, 1.0, gamma=0.9)
         self.init_weights()
         print(self.tokens)
 
@@ -284,9 +284,16 @@ def evaluate(model, epoch):
             total_loss += batch_loss
     masking_count = {index:masking_count[index]+1 if masking_count[index]==0 else masking_count[index] for index in masking_count.keys()}
     replacement_distributions = np.array([np.array(torch.divide(replacement_distributions[key], masking_count[key]).cpu()) for key in replacement_distributions.keys()])
-    #replacement_distributions = replacement_distributions[:model.cut, :model.cut]
+    
+    masking_array = np.array([masking_count[key] for key in masking_count.keys()])
+    replacement_distributions = replacement_distributions[:model.cut, :model.cut]
+    replacement_distributions = [np.divide(row, masking_array[:model.cut]) for row in replacement_distributions]
 
-    #print(replacement_distributions)
+    replacement_distributions = np.transpose(replacement_distributions)
+    replacement_distributions = np.array([np.array(nn.functional.softmax(torch.Tensor(dist))) for dist in replacement_distributions])
+    replacement_distributions = np.transpose(replacement_distributions)
+    replacement_distributions = np.array([np.array(nn.functional.softmax(torch.Tensor(dist))) for dist in replacement_distributions])
+
     plt.clf()
     np.savetxt('unnormalized.csv', replacement_distributions[:20, :20])
     seaborn.heatmap(replacement_distributions[:20, :20])
@@ -303,6 +310,18 @@ def evaluate(model, epoch):
             }, save_path)
     return total_loss/len(evalloader)
 
+def baseline(truthloaderlist, alphabet):
+    #print(truthloaderlist)
+    chars = chars_aa if alphabet == 'aa' else chars_codon
+    frequencies = {i:0 for i in range(len(chars)+3)}
+    current_batch_freq = {}
+    for batch in truthloaderlist:
+        #print(batch)
+        current_batch_freq = {token:batch.count(token) for token in batch}
+        for token in current_batch_freq:
+            frequencies[token] += batch.count(token)
+    return frequencies
+
 def train(model):
     train_file = open("train_loss.txt", "a")
     eval_file = open("eval_loss.txt", "a")
@@ -310,6 +329,7 @@ def train(model):
     # embeddings_file = open("embeddings.txt", "a")
     model.train()
     truth = Data_Set(model, model.fasta_file).data
+    print(baseline(truth, 'aa'))
     truth = torch.from_numpy(np.array(truth))
     truthloader = DataLoader(truth, model.batch_size)
     count = 0
@@ -331,8 +351,10 @@ def train(model):
             # print(mask_tensor, mask_tensor.size(), ignore_tensor, ignore_tensor.size())
             # print(out, out.size(), output_embedding, output_embedding.size())
             batch_loss = model.loss_function(torch.transpose(out, 1, 2), ignore_tensor)
+            for z in range(len(sequence_batch)):
+                print(sequence_batch[z], masked_batch[z], out[z])
             batch_loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 0.5)
             model.optimizer.step()
             model.scheduler.step()
             model.optimizer.zero_grad()
@@ -379,7 +401,7 @@ def train(model):
     plt.savefig(save_path)
 # wandb.login()
 
-test_model = TransformerModel(64,  'data/micro_aa.fasta', 'data/micro_test_aa.fasta', 'aa', 512)
+test_model = TransformerModel(64,  'data/single_aa.fasta', 'data/singla_test_aa.fasta', 'aa', 512)
 
 # run = wandb.init(
 #     # Set the project where this run will be logged
