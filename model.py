@@ -8,6 +8,7 @@ import wandb
 import seaborn
 import matplotlib.pyplot as plt
 import random
+import wandb
 
 import torch
 from torch import nn, Tensor
@@ -174,7 +175,7 @@ class PositionalEncoding(nn.Module):
         position = torch.arange(max_length).unsqueeze(1) #(max_length, 1)
         div_term = torch.exp(torch.arange(0, d_model, 2) * (-math.log(10000.0) / d_model))
         pe = torch.zeros(max_length, 1, d_model)
-        #pe = pe.cuda()
+        # pe = pe.cuda()
         pe[:, 0, 0::2] = torch.sin(position * div_term)
         pe[:, 0, 1::2] = torch.cos(position * div_term)
         size = pe.size()
@@ -373,7 +374,7 @@ def train(model):
             val_loss = str(evaluate(model, epoch + 1))
             train_file.write(val_loss)
             print("Validation Loss", val_loss)
-            #wandb.log({"loss": float(epoch_loss), "val loss": float(val_loss)})
+            wandb.log({"train loss": float(epoch_loss/len(truthloader)), "val loss": float(val_loss)})
     # extract_embeddings(embeddings_file)
 
 
@@ -401,7 +402,7 @@ def train(model):
     plt.savefig(save_path)
 # wandb.login()
 
-test_model = TransformerModel(64,  'data/single_aa.fasta', 'data/singla_test_aa.fasta', 'aa', 512)
+test_model = TransformerModel(64,  'data/micro_aa.fasta', 'data/micro_test_aa.fasta', 'aa', 512)
 
 # run = wandb.init(
 #     # Set the project where this run will be logged
@@ -413,4 +414,15 @@ test_model = TransformerModel(64,  'data/single_aa.fasta', 'data/singla_test_aa.
 #         "epochs": test_model.epochs,
 #     })
 
+path_curr = str(os.getcwd())
+os.environ["WANDB_CACHE_DIR"] = path_curr + "/wandb_cache/"
+os.environ["WANDB_CONFIG_DIR"] = path_curr + "/wandb_config/"
+os.environ["WANDB_DIR"] = path_curr + "/wandb/"
+
+# wandb.login()
+run = wandb.init(
+    project="nucleotide",
+    entity="ia93",
+    name="test run",
+    id=None)
 train(test_model)
