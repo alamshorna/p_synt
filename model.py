@@ -8,6 +8,7 @@ import wandb
 import seaborn
 import matplotlib.pyplot as plt
 import random
+import sys
 
 import torch
 from torch import nn, Tensor
@@ -17,7 +18,7 @@ import sklearn.preprocessing as skp
 import umap
 
 #from encoder import data_process, token_index_aa, token_index_codon, baseline, masking, encode_aa, encode_codon
-chars_aa = 'ARNDCQEGHILKMFPSTWYVX'
+#chars_aa = 'ARNDCQEGHILKMFPSTWYVX'
 chars_aa = 'CSTAGPDEQNHRKMILVWYFX'
 token_index_aa = {amino_acid:index for (index, amino_acid) in enumerate(chars_aa)}
 
@@ -118,18 +119,28 @@ mask_token_index = token_index_aa['[MASK]']
 def masking(tokenized_tensor, masking_proportion, mask_token_index, batch_size = 32, max_len = 256):
     masked_tensor = tokenized_tensor.clone()
     ignore_tensor = tokenized_tensor.clone()
-    num_tokens_to_mask = int(masking_proportion * len(tokenized_tensor[0]))
     mask_tensors = []
-    for i in range(len(masked_tensor)):
-        masked_sequence = masked_tensor[i]
-        masked_indices = torch.randperm(len(tokenized_tensor[0]))[:num_tokens_to_mask]
-        all_indices = torch.tensor([i for i in range(max_len)])
-        both = torch.cat((masked_indices, all_indices))
-        singles, counts = both.unique(return_counts=True)
-        difference = singles[counts == 1]
-        mask_tensors.append(masked_indices.tolist())
-        masked_sequence[masked_indices] = mask_token_index  # Replace with [MASK] token
-        ignore_tensor[i][difference] = -100
+    total_pad = torch.unique(masked_tensor, return_counts = True)[1][-1].item()
+    unpadded_len = len(tokenized_tensor[0]) - total_pad
+    num_tokens_to_mask = int(masking_proportion * unpadded_len)
+    # Iterate through each row
+    for i in range(masked_tensor.size(0)):
+        # Exclude the first dimension and any dimension with a value of 23
+        valid_indices = (masked_tensor[i] != 23) & (torch.arange(512) != 0)
+        valid_indices_to_mask = torch.arange(512)[valid_indices][1:]
+
+        # Get random indices to mask from the valid indices
+        mask_indices = torch.randperm(valid_indices_to_mask.size(0))[:num_tokens_to_mask]
+        mask_indices = valid_indices_to_mask[mask_indices]
+
+        # Set the value at the masked indices to 24
+        masked_tensor[i, mask_indices] = mask_token_index
+
+        # For the special masked tensor, set unmasked values to -100
+        unmasked_indices = torch.ones(512, dtype=bool)
+        unmasked_indices[mask_indices] = 0
+        ignore_tensor[i, unmasked_indices] = -100
+        ignore_tensor[i, mask_indices] = tokenized_tensor[i, mask_indices].clone()
     return masked_tensor, torch.tensor(mask_tensors), ignore_tensor
 
 def data_process(model, fasta):
@@ -190,42 +201,31 @@ def number_sequences(fasta_file):
     fasta_data = list(SeqIO.parse(open(fasta_file), 'fasta'))
     return len(fasta_data)
 
-class TransformerModel (nn.Module):
-    def __init__(self, d_model, fasta_file, eval_file, alphabet_string, max_length = 512):
-        super(TransformerModel, self).__init__()
-        self.model_type = 'Transformer'
+
+class LSTMModel(nn.Module):
+    def __init__(self, d_model, fasta_file, eval_file, alphabet_string, max_length=512):
+        super(LSTMModel, self).__init__()
+        self.model_type = 'LSTM'
         self.fasta_file = fasta_file
         self.eval_file = eval_file
         self.alphabet = alphabet_string
 
-        #input information
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.ninp = number_sequences(fasta_file)
         self.ntoken = len(token_index_aa) if alphabet_string == 'aa' else len(token_index_codon)
         self.max_length = max_length
         self.tokens = token_index_aa if alphabet_string == 'aa' else token_index_codon
         self.d_model = d_model
-        self.pos_encoder = PositionalEncoding(fasta_file, self.max_length, self.alphabet, self.d_model)
-        self.embedding = nn.Embedding(self.ntoken, self.d_model, device = self.device)
-        self.tokenizer = encode_aa if alphabet_string == 'aa' else encode_codon
-        self.cut = 20 if alphabet_string == 'aa' else 64
-        encoder_layer = TransformerEncoderLayer(d_model, 8, device=self.device, batch_first=True, norm_first = True)
-        self.transformer_encoder = TransformerEncoder(encoder_layer, 24)
-       
-        decoder_layer = TransformerDecoderLayer(d_model, 8)
-        self.transformer_decoder = torch.nn.TransformerDecoder(decoder_layer, 6)
-        #(64 by ntokens) = average up all of the embeddings
-        #dimensionality reduction
-        #describe how similar the embeddings are
-        #if that clusters we're doing well
 
+        self.embedding = nn.Embedding(self.ntoken, self.d_model, device=self.device)
+        self.lstm = nn.LSTM(self.d_model, self.d_model, batch_first=True, bidirectional=True)
+        self.linear = nn.Linear(2 * self.d_model, self.ntoken, device=self.device)
 
-        self.linear = nn.Linear(self.d_model, self.ntoken, device=self.device)
         self.epochs = 10
         self.batch_size = 32
         self.log_interval = 1
-        self.learning_rate = 0.005 
-        self.loss_function = nn.CrossEntropyLoss(size_average = True, ignore_index = -100)
+        self.learning_rate = 0.0065 
+        self.loss_function = nn.CrossEntropyLoss(size_average=True, ignore_index=-100)
         self.optimizer = torch.optim.AdamW(self.parameters(), lr=self.learning_rate, weight_decay=0.01)
         self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, 1.0, gamma=0.9)
         self.init_weights()
@@ -240,19 +240,11 @@ class TransformerModel (nn.Module):
         #self.linear.weight.data.uniform_(-initrange, initrange)
 
     def forward(self, src):
-        #print('original', src, src.size())
-        #print(src)
-        src = self.embedding(src) * math.sqrt(self.d_model)
-        #print('embedding', src, src.size())
-        src = self.pos_encoder(src)
-        #print('pos encoded', src, src.size())
-        encoded = self.transformer_encoder(src)
-        output = self.linear(encoded)
-        #set to zero for [PAD], [MASK]
-        #output[:, 27:] = -1e7 #make a hyperparameter
-        #print(output)
-        #output = torch.nn.functional.softmax(output)
-        return output, encoded
+        src = self.embedding(src)
+        output, _ = self.lstm(src)
+        output = self.linear(output)
+        
+        return output, None 
 
 def evaluate(model, epoch):
     model.eval()
@@ -271,6 +263,7 @@ def evaluate(model, epoch):
             batch_loss = 0
             masked_batch, mask_tensor, ignore_tensor = masking(batch, 0.15, model.tokens['[MASK]'])
             out, output_embedding = model(masked_batch)
+            
             #print(out)
             batch_loss = model.loss_function(torch.transpose(out, 1, 2), ignore_tensor)
             for i in range(len(batch)):
@@ -286,18 +279,20 @@ def evaluate(model, epoch):
     replacement_distributions = np.array([np.array(torch.divide(replacement_distributions[key], masking_count[key]).cpu()) for key in replacement_distributions.keys()])
     
     masking_array = np.array([masking_count[key] for key in masking_count.keys()])
-    replacement_distributions = replacement_distributions[:model.cut, :model.cut]
-    replacement_distributions = [np.divide(row, masking_array[:model.cut]) for row in replacement_distributions]
+    replacement_distributions = replacement_distributions[:20, :20]
+    replacement_distributions = [np.divide(row, masking_array[:20]) for row in replacement_distributions]
 
-    replacement_distributions = np.transpose(replacement_distributions)
-    replacement_distributions = np.array([np.array(nn.functional.softmax(torch.Tensor(dist))) for dist in replacement_distributions])
-    replacement_distributions = np.transpose(replacement_distributions)
+    # replacement_distributions = np.transpose(replacement_distributions)
+    # replacement_distributions = np.array([np.array(nn.functional.softmax(torch.Tensor(dist))) for dist in replacement_distributions])
+    # replacement_distributions = np.transpose(replacement_distributions)
     replacement_distributions = np.array([np.array(nn.functional.softmax(torch.Tensor(dist))) for dist in replacement_distributions])
 
+    print(replacement_distributions)
     plt.clf()
     np.savetxt('unnormalized.csv', replacement_distributions[:20, :20])
     seaborn.heatmap(replacement_distributions[:20, :20])
     path = 'picture' + str(epoch) + '.png'
+    print('saving figure')
     plt.savefig(path)
 
     save_path = 'saved_model' + str(epoch) + '.pt'
@@ -310,33 +305,28 @@ def evaluate(model, epoch):
             }, save_path)
     return total_loss/len(evalloader)
 
-def baseline(truthloaderlist, alphabet):
-    #print(truthloaderlist)
-    chars = chars_aa if alphabet == 'aa' else chars_codon
-    frequencies = {i:0 for i in range(len(chars)+3)}
-    current_batch_freq = {}
-    for batch in truthloaderlist:
-        #print(batch)
-        current_batch_freq = {token:batch.count(token) for token in batch}
-        for token in current_batch_freq:
-            frequencies[token] += batch.count(token)
-    return frequencies
+# def baseline(truthloaderlist, alphabet):
+#     #print(truthloaderlist)
+#     chars = chars_aa if alphabet == 'aa' else chars_codon
+#     frequencies = {i:0 for i in range(len(chars)+3)}
+#     current_batch_freq = {}
+#     for batch in truthloaderlist:
+#         #print(batch)
+#         current_batch_freq = {token:batch.count(token) for token in batch}
+#         for token in current_batch_freq:
+#             frequencies[token] += batch.count(token)
+#     return frequencies
 
 def train(model):
     train_file = open("train_loss.txt", "a")
     eval_file = open("eval_loss.txt", "a")
-    # masked_seqs_files = open("masked_seqs.txt", "a")
-    # embeddings_file = open("embeddings.txt", "a")
+    
     model.train()
     truth = Data_Set(model, model.fasta_file).data
-    print(baseline(truth, 'aa'))
     truth = torch.from_numpy(np.array(truth))
+    print(truth, truth.size())
     truthloader = DataLoader(truth, model.batch_size)
     count = 0
-    token_embeddings = {token: torch.zeros(model.d_model) for token in range(model.ntoken)}
-    token_counts = {token:0 for token in range(model.d_model)}
-    for key, value in token_embeddings.items():
-            token_embeddings[key] = token_embeddings[key].to(device)
     for epoch in range(model.epochs):
         epoch_loss = 0
         print(len(truthloader))
@@ -346,26 +336,14 @@ def train(model):
             sequence_batch = sequence_batch.to(model.device)
             batch_loss = 0
             masked_batch, mask_tensor, ignore_tensor = masking(sequence_batch, 0.15, model.tokens['[MASK]'], model.batch_size)
-            out, output_embedding = model(masked_batch)
-            # print(sequence_batch, sequence_batch.size(), masked_batch, masked_batch.size())
-            # print(mask_tensor, mask_tensor.size(), ignore_tensor, ignore_tensor.size())
-            # print(out, out.size(), output_embedding, output_embedding.size())
-            batch_loss = model.loss_function(torch.transpose(out, 1, 2), ignore_tensor)
-            for z in range(len(sequence_batch)):
-                print(sequence_batch[z], masked_batch[z], out[z])
+            out, _ = model(masked_batch)
+            batch_loss = model.loss_function(torch.transpose(out, 1, 2), sequence_batch)
             batch_loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), 0.5)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)  # Apply gradient clipping
             model.optimizer.step()
-            model.scheduler.step()
             model.optimizer.zero_grad()
             epoch_loss += batch_loss
-            if epoch+1 == model.epochs:
-                for i in range(len(sequence_batch)):
-                    for j in range(len(sequence_batch[i])):
-                        current_token = sequence_batch[i][j].item()
-                        if current_token != -100:
-                            token_embeddings[current_token] = torch.add(token_embeddings[current_token], output_embedding[i][j])
-                            token_counts[current_token] += 1
+        model.scheduler.step()
         if epoch % model.log_interval == 0 or epoch == 0:
             loss_string = "Epoch " + str(epoch+1) +  " loss " + str(epoch_loss/len(truthloader))
             print(loss_string)
@@ -373,44 +351,6 @@ def train(model):
             val_loss = str(evaluate(model, epoch + 1))
             train_file.write(val_loss)
             print("Validation Loss", val_loss)
-            #wandb.log({"loss": float(epoch_loss), "val loss": float(val_loss)})
-    # extract_embeddings(embeddings_file)
-
-
-    token_counts = {index:token_counts[index]+1 if token_counts[index]==0 else token_counts[index] for index in token_counts.keys()}
-    embeddings = {current_token:torch.divide(token_embeddings[current_token], token_counts[current_token]) for current_token in token_embeddings.keys()}
-    print(embeddings)
-    
-    plt.clf()
-    embedding_array = []
-    for i in range(model.ntoken):
-        embedding_array.append(embeddings[i].cpu().detach().numpy())
-    embedding_array = np.array(embedding_array)
-    reducer = umap.UMAP().fit(embedding_array)
-    print(list(token_embeddings.keys())[0])
-    print(type(token_embeddings.keys()))
-    # umap.plot.points(reducer, labels = list(token_embeddings.keys()), theme = 'fire')
-    
-    embedding_array = embedding_array[:model.cut, :model.cut]
-
-    data = reducer.fit_transform(embedding_array)
-    plt.scatter(data[:, 0], data[:, 1])
-    for i in range(model.cut):
-        plt.text(data[:, 0][i], data[:, 1][i], list(model.tokens.keys())[i])
-    save_path = 'embedding_uMAP.png'
-    plt.savefig(save_path)
-# wandb.login()
-
-test_model = TransformerModel(64,  'data/single_aa.fasta', 'data/singla_test_aa.fasta', 'aa', 512)
-
-# run = wandb.init(
-#     # Set the project where this run will be logged
-#     name = "transformer-model-human-aa-07_04_23-alamshorna",
-#     project= "nucleotide",
-#     # Track hyperparameters and run metadata
-#     config={
-#         "learning_rate": test_model.learning_rate,
-#         "epochs": test_model.epochs,
-#     })
+test_model = LSTMModel(64,  'data/micro_aa.fasta', 'data/micro_test_aa.fasta', 'aa', 512)
 
 train(test_model)
