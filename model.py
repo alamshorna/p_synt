@@ -8,6 +8,7 @@ import wandb
 import seaborn
 import matplotlib.pyplot as plt
 import random
+import wandb
 import sys
 
 import torch
@@ -185,7 +186,7 @@ class PositionalEncoding(nn.Module):
         position = torch.arange(max_length).unsqueeze(1) #(max_length, 1)
         div_term = torch.exp(torch.arange(0, d_model, 2) * (-math.log(10000.0) / d_model))
         pe = torch.zeros(max_length, 1, d_model)
-        #pe = pe.cuda()
+        # pe = pe.cuda()
         pe[:, 0, 0::2] = torch.sin(position * div_term)
         pe[:, 0, 1::2] = torch.cos(position * div_term)
         size = pe.size()
@@ -351,6 +352,55 @@ def train(model):
             val_loss = str(evaluate(model, epoch + 1))
             train_file.write(val_loss)
             print("Validation Loss", val_loss)
-test_model = LSTMModel(64,  'data/micro_aa.fasta', 'data/micro_test_aa.fasta', 'aa', 512)
+            #wandb.log({"loss": float(epoch_loss), "val loss": float(val_loss)})
+    # extract_embeddings(embeddings_file)
 
+
+    token_counts = {index:token_counts[index]+1 if token_counts[index]==0 else token_counts[index] for index in token_counts.keys()}
+    embeddings = {current_token:torch.divide(token_embeddings[current_token], token_counts[current_token]) for current_token in token_embeddings.keys()}
+    print(embeddings)
+    
+    plt.clf()
+    embedding_array = []
+    for i in range(model.ntoken):
+        embedding_array.append(embeddings[i].cpu().detach().numpy())
+    embedding_array = np.array(embedding_array)
+    reducer = umap.UMAP().fit(embedding_array)
+    print(list(token_embeddings.keys())[0])
+    print(type(token_embeddings.keys()))
+    # umap.plot.points(reducer, labels = list(token_embeddings.keys()), theme = 'fire')
+    
+    embedding_array = embedding_array[:model.cut, :model.cut]
+
+    data = reducer.fit_transform(embedding_array)
+    plt.scatter(data[:, 0], data[:, 1])
+    for i in range(model.cut):
+        plt.text(data[:, 0][i], data[:, 1][i], list(model.tokens.keys())[i])
+    save_path = 'embedding_uMAP.png'
+    plt.savefig(save_path)
+# wandb.login()
+
+test_model = TransformerModel(64,  'data/single_aa.fasta', 'data/singla_test_aa.fasta', 'aa', 512)
+
+# run = wandb.init(
+#     # Set the project where this run will be logged
+#     name = "transformer-model-human-aa-07_04_23-alamshorna",
+#     project= "nucleotide",
+#     # Track hyperparameters and run metadata
+#     config={
+#         "learning_rate": test_model.learning_rate,
+#         "epochs": test_model.epochs,
+#     })
+
+path_curr = str(os.getcwd())
+os.environ["WANDB_CACHE_DIR"] = path_curr + "/wandb_cache/"
+os.environ["WANDB_CONFIG_DIR"] = path_curr + "/wandb_config/"
+os.environ["WANDB_DIR"] = path_curr + "/wandb/"
+
+# wandb.login()
+run = wandb.init(
+    project="nucleotide",
+    entity="ia93",
+    name="test run",
+    id=None)
 train(test_model)
