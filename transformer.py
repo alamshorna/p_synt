@@ -219,17 +219,12 @@ class TransformerModel (nn.Module):
        
         decoder_layer = TransformerDecoderLayer(d_model, 8)
         self.transformer_decoder = torch.nn.TransformerDecoder(decoder_layer, 6)
-        #(64 by ntokens) = average up all of the embeddings
-        #dimensionality reduction
-        #describe how similar the embeddings are
-        #if that clusters we're doing well
-
 
         self.linear = nn.Linear(self.d_model, self.ntoken, device=self.device)
         self.epochs = 10
-        self.batch_size = 32
+        self.batch_size = 1
         self.log_interval = 1
-        self.learning_rate = 0.0065 
+        self.learning_rate = 0.00065 
         self.loss_function = nn.CrossEntropyLoss(size_average = True, ignore_index = -100)
         self.optimizer = torch.optim.AdamW(self.parameters(), lr=self.learning_rate, weight_decay=0.01)
         self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, 1.0, gamma=0.9)
@@ -239,24 +234,20 @@ class TransformerModel (nn.Module):
     def init_weights(self):
         initrange = 0.1
         nn.init.uniform_(self.embedding.weight, -math.sqrt(1/self.d_model), math.sqrt(1/self.d_model))
-        #self.embedding.weight.data.uniform_(-initrange, initrange)
         self.linear.bias.data.zero_()
         nn.init.xavier_uniform_(self.linear.weight)
-        #self.linear.weight.data.uniform_(-initrange, initrange)
 
     def forward(self, src):
-        #print('original', src, src.size())
-        #print(src)
+        #print('src', src.is_leaf)
         src = self.embedding(src) * math.sqrt(self.d_model)
-        #print('embedding', src, src.size())
+        #src = src.detach()
+        #print('embedded', src.is_leaf)
         src = self.pos_encoder(src)
-        #print('pos encoded', src, src.size())
+        #print('pos_encoded', src.is_leaf)
         encoded = self.transformer_encoder(src)
         output = self.linear(encoded)
-        #set to zero for [PAD], [MASK]
-        #output[:, 27:] = -1e7 #make a hyperparameter
-        #print(output)
-        #output = torch.nn.functional.softmax(output)
+        #print('end', output.is_leaf)
+        #output = output.detach()
         return output, encoded
 
 def evaluate(model, epoch):
@@ -327,16 +318,9 @@ def baseline(truthloaderlist, alphabet):
     return frequencies
 
 def train(model):
-    train_file = open("train_loss.txt", "a")
-    eval_file = open("eval_loss.txt", "a")
-    # masked_seqs_files = open("masked_seqs.txt", "a")
-    # embeddings_file = open("embeddings.txt", "a")
     model.train()
     truth = Data_Set(model, model.fasta_file).data
-    
-    print(baseline(truth, 'aa'))
     truth = torch.from_numpy(np.array(truth))
-    #print(truth, truth.size())
     truthloader = DataLoader(truth, model.batch_size)
     count = 0
     token_embeddings = {token: torch.zeros(model.d_model) for token in range(model.ntoken)}
@@ -348,49 +332,41 @@ def train(model):
         print(len(truthloader))
         for sequence_batch in truthloader:
             count += 32
-            print(count)
             sequence_batch = sequence_batch.to(model.device)
-            #print(sequence_batch, sequence_batch.shape)
-            
             batch_loss = 0
             masked_batch, mask_tensor, ignore_tensor = masking(sequence_batch, 0.15, model.tokens['[MASK]'], model.batch_size)
-            
-            # print(masked_batch, masked_batch.size())
-            # print(sequence_batch, sequence_batch.size())
-            # print((masked_batch==24).sum(axis=1))
-            # print(mask_tensor, mask_tensor.size(), ignore_tensor, ignore_tensor.size())
-            
-            #sys.exit(0)
+            # print('batch leaf', masked_batch.is_leaf)
             out, output_embedding = model(masked_batch)
-            print(out, out.size(), output_embedding, output_embedding.size())
-            
-            batch_loss = model.loss_function(torch.transpose(out, 1, 2), ignore_tensor)
-            # for z in range(len(sequence_batch)):
-            #     print(sequence_batch[z], masked_batch[z], out[z])
+            # print('out leaf', out.is_leaf)
+            #print('out', math.nan in out)
+            # print('out', math.nan in torch.transpose(out, 1, 2))
+            #print('ignore', math.nan in ignore_tensor)
+            # print(torch.transpose(out, 1, 2), ignore_tensor)
+            # print(torch.transpose(out, 1, 2).size(), ignore_tensor.size())
+            #print(out, out.size())
+            out = out.view(-1, 29)
+            ignore_tensor = ignore_tensor.view(-1)
+            batch_loss = model.loss_function(out, ignore_tensor)
+            #print(batch_loss, batch_loss.size())
+            #print('batch', math.nan in batch_loss, batch_loss.grad)
+            #print('leaf?', batch_loss.is_leaf)
+            #print(batch_loss)
+            #print(batch_loss, batch_loss.grad)
+            model.optimizer.zero_grad()
             batch_loss.backward()
+            #print('batch', math.nan in batch_loss, batch_loss.grad)
             torch.nn.utils.clip_grad_norm_(model.parameters(), 0.5)
             model.optimizer.step()
-            model.optimizer.zero_grad()
-            epoch_loss += batch_loss
-            if epoch+1 == model.epochs:
-                for i in range(len(sequence_batch)):
-                    for j in range(len(sequence_batch[i])):
-                        current_token = sequence_batch[i][j].item()
-                        if current_token != -100:
-                            token_embeddings[current_token] = torch.add(token_embeddings[current_token], output_embedding[i][j])
-                            token_counts[current_token] += 1
+            #print('batch', math.nan in batch_loss, batch_loss.grad)
+            epoch_loss += batch_loss.item()
         model.scheduler.step()
         if epoch % model.log_interval == 0 or epoch == 0:
             loss_string = "Epoch " + str(epoch+1) +  " loss " + str(epoch_loss/len(truthloader))
             print(loss_string)
-            train_file.write(loss_string)
             val_loss = str(evaluate(model, epoch + 1))
-            train_file.write(val_loss)
             print("Validation Loss", val_loss)
             #wandb.log({"loss": float(epoch_loss), "val loss": float(val_loss)})
     # extract_embeddings(embeddings_file)
-
-
     token_counts = {index:token_counts[index]+1 if token_counts[index]==0 else token_counts[index] for index in token_counts.keys()}
     embeddings = {current_token:torch.divide(token_embeddings[current_token], token_counts[current_token]) for current_token in token_embeddings.keys()}
     print(embeddings)
